@@ -6,18 +6,18 @@ from skimage.feature import canny
 from skimage.transform import hough_line, hough_line_peaks
 from scipy.ndimage import gaussian_filter
 
-
-def detect_grid_lines(img, sigma=3, threshold=0.2, min_distance=50, min_angle=10):
+def detect_grid_lines(img, sigma=3, threshold=0.2, min_distance=50, min_angle=10, num_peaks=50):
     """Detect straight lines using Canny edge + Hough transform."""
     # Smooth to reduce noise
-    smoothed = gaussian_filter(img, sigma=sigma)
+    if len(img.shape) == 3: img = img.mean(axis=2).astype(np.float32)
+    img_norm = (img - img.min()) / (img.max() - img.min() + 1e-12)
+    smoothed = gaussian_filter(img_norm, sigma=sigma)
     
     # Enhanced contrast for grid
-    smoothed = (smoothed - smoothed.min()) / (smoothed.max() - smoothed.min() + 1e-12)
+    # smoothed = (smoothed - smoothed.min()) / (smoothed.max() - smoothed.min() + 1e-12)
     
     # Detect edges
     edges = canny(smoothed, low_threshold=threshold*0.5, high_threshold=threshold)
-    
     # Hough transform
     h, theta, d = hough_line(edges)
     
@@ -27,7 +27,7 @@ def detect_grid_lines(img, sigma=3, threshold=0.2, min_distance=50, min_angle=10
                                                         min_distance=min_distance,
                                                         min_angle=min_angle,
                                                         threshold=0.4 * h.max(),
-                                                        num_peaks=20)):
+                                                        num_peaks=num_peaks)):
         lines.append((angle_val, dist_val))
     
     return lines, edges
