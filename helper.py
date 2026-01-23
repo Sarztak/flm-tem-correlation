@@ -11,6 +11,13 @@ def load_image(path):
         img = img.mean(axis=2)
     return (img.astype(np.float32) - img.mean()) / (img.std() + 1e-8)
 
+def center_crop(img, crop_h=512, crop_w=512):
+    """Return center crop of the input image."""
+    h, w = img.shape[:2]
+    start_h = (h - crop_h) // 2
+    start_w = (w - crop_w) // 2
+    return img[start_h:start_h + crop_h, start_w:start_w + crop_w]
+
 def detect_dots(img, sigma=2, size=10, threshold_percentile=90):
     smoothed = ndimage.gaussian_filter(img, sigma=sigma)
     local_max = ndimage.maximum_filter(smoothed, size=size)
