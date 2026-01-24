@@ -5,6 +5,7 @@ import numpy as np
 from skimage.feature import canny
 from skimage.transform import hough_line, hough_line_peaks
 from scipy.ndimage import gaussian_filter
+np.set_printoptions(precision=10, suppress=True)
 
 def detect_grid_lines(img, sigma=3, threshold=0.2, min_distance=50, min_angle=10, num_peaks=5):
     """Detect straight lines using Canny edge + Hough transform."""
@@ -20,7 +21,6 @@ def detect_grid_lines(img, sigma=3, threshold=0.2, min_distance=50, min_angle=10
 
     # Hough transform
     h, theta, d = hough_line(edges)
-    
     # Find peaks in Hough space
     lines = []
     for _, angle_val, dist_val in zip(*hough_line_peaks(h, theta, d,
@@ -30,6 +30,22 @@ def detect_grid_lines(img, sigma=3, threshold=0.2, min_distance=50, min_angle=10
                                                         num_peaks=num_peaks)):
         lines.append((angle_val, dist_val))
     return lines, edges
+
+def group_lines(lines, tol=5):
+    from collections import defaultdict
+    angles = np.array(lines)[:, 0]
+    degrees = angles * 180 / np.pi # convert radian to degrees
+    degrees = np.sort(degrees)
+    grp_lines = defaultdict(list)
+    count = 0
+    grp_lines[count].append(degrees[0])
+    for i in range(len(degrees) - 1):
+        if np.abs(degrees[i] - degrees[i + 1]) > tol:
+            count += 1
+            grp_lines[count].append(degrees[i + 1])
+        else:
+            grp_lines[count].append(degrees[i])
+    return grp_lines
 
 def overlay_hough_lines(img, lines, value=255):
     """

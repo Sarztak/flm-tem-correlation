@@ -7,9 +7,7 @@ import matplotlib.pyplot as plt
 
 def load_image(path):
     img = io.imread(path)
-    if len(img.shape) == 3:
-        img = img.mean(axis=2)
-    return (img.astype(np.float32) - img.mean()) / (img.std() + 1e-8)
+    return img
 
 def center_crop(img, crop_h=512, crop_w=512):
     """Return center crop of the input image."""
