@@ -5,11 +5,11 @@ from scipy.ndimage import rotate
 from PIL import Image
 def main():
     # visualize_detected_dots(,)
-    # flm_img = load_image("./images/grid_1/flm.tif", )
-    tem_img = load_image("./images/grid_1/tem.tif", )
+    flm_img = load_image("./images/grid_1/flm.tif", )
+    # tem_img = load_image("./images/grid_1/tem.tif", )
     # flm_img = center_crop(flm_img)
     lines, edges = detect_grid_lines(
-        tem_img, 
+        flm_img, 
         sigma=4,
         threshold=0.1,
         min_angle=50, 
@@ -28,12 +28,16 @@ def main():
     diff_90 = 'yes' if np.abs(diff - 90) > tol else 'no'
     # rotate the image
     angle = (90 - a2) # assuming a2 is in first quadrant
-    rot_img = rotate(tem_img, -angle, reshape=False) # need anticlockwise rot
+    rot_img = rotate(flm_img, -angle, reshape=False) # need anticlockwise rot
+
+    # make the image binary
+    rot_img = rot_img.mean(axis=2)
+    rot_img[rot_img.astype(int) > 30] = 255 # where it is not black make it white
+    rot_img = rot_img.astype(np.uint8)
     rot_img_pil = Image.fromarray(rot_img)
-    rot_img_pil.save('rot_tem.png')
-    breakpoint()
-    out = overlay_hough_lines(flm_img, lines)
-    imsave("flm_512.png", out.astype(np.uint8))
+    rot_img_pil.save('rot_flm.png')
+    # out = overlay_hough_lines(flm_img, lines)
+    # imsave("flm_512.png", out.astype(np.uint8))
     # visualize_detected_lines(flm_img, lines, "TEM")
     # visualize_edges_only("./images/grid_1/flm.tif", threshold_range=[0.1, 0.2, 0.3], sigma_range=[6, 7, 8])
 if __name__ == "__main__":
