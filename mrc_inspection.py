@@ -17,32 +17,32 @@ used to convert from the single channel data to 3 channel RGB image
 # if len(tem_arr.shape) == 3:
 #     tem_arr = cv2.cvtColor(tem_arr, cv2.COLOR_RGB2GRAY)
 
-# the flm_img needs to be inverted so that gradient can be match
-# flm_inv = 255 - flm_cropped_arr
-# sift = cv2.SIFT.create(
-#     nfeatures=0, # 0 = detect all,
-#     nOctaveLayers=3, # layers per octave in the pyramid
-#     contrastThreshold=0.04, # lower = more keypoints detected
-#     edgeThreshold=10, # higher = mroe keypoints detected
-#     sigma=1.6, # blur for the first octave
-# )
-# keypoints_flm, descriptors_flm = sift.detectAndCompute(flm_inv, None)
-# keypoints_tem, descriptors_tem = sift.detectAndCompute(tem_arr, None)
+def match_sift_keypoints(tem_img, flm_img):
 
-# img_keypoints = cv2.drawKeypoints(flm_inv, keypoints, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-# cv2.imwrite(out_dir / 'keypoints_flm.png', img_keypoints)
+    sift = cv2.SIFT.create(
+        nfeatures=0, # 0 = detect all,
+        nOctaveLayers=3, # layers per octave in the pyramid
+        contrastThreshold=0.04, # lower = more keypoints detected
+        edgeThreshold=10, # higher = mroe keypoints detected
+        sigma=1.6, # blur for the first octave
+    )
+    keypoints_flm, descriptors_flm = sift.detectAndCompute(flm_img, None)
+    keypoints_tem, descriptors_tem = sift.detectAndCompute(tem_img, None)
 
-# bf = cv2.BFMatcher()
-# matches = bf.knnMatch(descriptors_flm, descriptors_tem, k=2)
+    # img_keypoints = cv2.drawKeypoints(flm_img, keypoints_flm, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    # cv2.imwrite(out_dir / 'keypoints_flm.png', img_keypoints)
 
-# Lowe's ratio test to filter out the bad matches
-# good_matches = []
-# for m, n in matches:
-#     if m.distance < 0.75 * n.distance:
-#         good_matches.append(m)
+    bf = cv2.BFMatcher()
+    matches = bf.knnMatch(descriptors_flm, descriptors_tem, k=2)
 
-# img_matches = cv2.drawMatches(flm_inv, keypoints_flm, tem_arr, keypoints_tem, good_matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-# cv2.imwrite(out_dir / 'matches.png', img_matches)
+    # Lowe's ratio test to filter out the bad matches
+    good_matches = []
+    for m, n in matches:
+        if m.distance < 0.85 * n.distance:
+            good_matches.append(m)
+
+    img_matches = cv2.drawMatches(flm_img, keypoints_flm, tem_img, keypoints_tem, good_matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+    cv2.imwrite(out_dir / 'matches.png', img_matches)
 
 if __name__ == "__main__":
     jey_002_g3_l3_path = Path('./jey_002_g3_l3')
@@ -54,5 +54,8 @@ if __name__ == "__main__":
     tem_contour = create_edge_tem(tem_img_path, 300, 400)
     cv2.imwrite(out_dir / 'tem_contour.png', tem_contour)
 
-    # flm_contour = create_edge_flm(flm_cropped_refl_path, 0, 0)
+    # flm_contour = create_edge_flm(flm_cropped_refl_path_2, 30, 50)
     # cv2.imwrite(out_dir / 'flm_contour.png', flm_contour)
+
+    flm_img = load_image(flm_cropped_refl_path)
+    match_sift_keypoints(tem_contour, flm_img)
