@@ -1,0 +1,54 @@
+import mrcfile
+import numpy as np 
+import cv2
+from pathlib import Path
+from helper import load_image
+
+"""
+the .st file is 4096 x 4096 numpy array so it has only the intensity information
+the .tif file is a 1366 x 1366 x 3 RGB image which means some software was
+used to convert from the single channel data to 3 channel RGB image
+"""
+
+jey_002_g3_l3_path = Path('./jey_002_g3_l3')
+tem_img_path = jey_002_g3_l3_path / "JEY002_G3_L3_1950x_t-13.tif"
+flm_cropped_refl_path = jey_002_g3_l3_path / "FLM-JEY002_G3_L3_z11_refl_cropped.tif"
+out_dir = Path('./output')
+some_path = r"C:\Users\sar31\Pictures\Screenshots\Screenshot 2026-03-31 094740.png"
+
+flm_cropped_arr = load_image(flm_cropped_refl_path)
+tem_arr = load_image(tem_img_path)
+
+# convert to single channel since sift expects single channel
+if len(flm_cropped_arr.shape) == 3:
+    flm_cropped_arr = cv2.cvtColor(flm_cropped_arr, cv2.COLOR_RGB2GRAY)
+if len(tem_arr.shape) == 3:
+    tem_arr = cv2.cvtColor(tem_arr, cv2.COLOR_RGB2GRAY)
+
+# the flm_img needs to be inverted so that gradient can be match
+flm_inv = 255 - flm_cropped_arr
+sift = cv2.SIFT.create(
+    nfeatures=0, # 0 = detect all,
+    nOctaveLayers=3, # layers per octave in the pyramid
+    contrastThreshold=0.04, # lower = more keypoints detected
+    edgeThreshold=10, # higher = mroe keypoints detected
+    sigma=1.6, # blur for the first octave
+)
+keypoints_flm, descriptors_flm = sift.detectAndCompute(flm_inv, None)
+keypoints_tem, descriptors_tem = sift.detectAndCompute(tem_arr, None)
+
+# img_keypoints = cv2.drawKeypoints(flm_inv, keypoints, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+# cv2.imwrite(out_dir / 'keypoints_flm.png', img_keypoints)
+
+bf = cv2.BFMatcher()
+matches = bf.knnMatch(descriptors_flm, descriptors_tem, k=2)
+
+# Lowe's ratio test to filter out the bad matches
+good_matches = []
+for m, n in matches:
+    if m.distance < 0.75 * n.distance:
+        good_matches.append(m)
+
+print(good_matches)
+img_matches = cv2.drawMatches(flm_inv, keypoints_flm, tem_arr, keypoints_tem, good_matches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+cv2.imwrite(out_dir / 'matches.png', img_matches)
