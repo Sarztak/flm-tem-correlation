@@ -4,6 +4,8 @@ from skimage import io
 from scipy import ndimage
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+from pathlib import Path
+import cv2
 
 def load_image(path):
     img = io.imread(path)
@@ -103,3 +105,40 @@ def visualize_result(flm, tem, r, s, tx, ty):
     overlay[:, :, 0] = flm_n[:h, :w]
     overlay[:, :, 1] = t_n[:h, :w]
     plt.imsave('alignment_result.png', overlay, dpi=150)
+
+def create_edge_tem(path: Path, threshold1=100, threshold2=200) -> np.array:
+    tem_img = load_image(path)
+
+    # make into B&W image
+    if len(tem_img.shape) == 3:
+        tem_img = cv2.cvtColor(tem_img, cv2.COLOR_RGB2GRAY)
+
+    # shrink the size by about 8x
+    h, w = tem_img.shape 
+
+    # downsample using INTER_AREA that averages all the pixels in the source region to the output pixel if shrinking by 8x then a block of 8x8 is mapped to a single pixel in the output pixel
+
+    tem_downsampled = cv2.resize(
+        tem_img,
+        (w // 8, h // 8),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    # then find the edges using canny filter
+    edges = cv2.Canny(
+        tem_downsampled, threshold1=threshold1, threshold2=threshold2
+    )
+
+    # find the contours
+    contours, _ = cv2.findContours(
+        edges, 
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+    
+    largest = max(contours, key=cv2.contourArea)
+    mask = np.zeros_like(tem_downsampled)
+    mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=1)
+    return mask_with_contour
+
+
