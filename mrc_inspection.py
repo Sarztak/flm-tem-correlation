@@ -2,7 +2,7 @@ import mrcfile
 import numpy as np 
 import cv2
 from pathlib import Path
-from helper import load_image, create_edge_tem
+from helper import load_image, create_edge_tem, create_edge_flm
 
 """
 the .st file is 4096 x 4096 numpy array so it has only the intensity information
@@ -53,3 +53,6 @@ if __name__ == "__main__":
 
     tem_contour = create_edge_tem(tem_img_path, 300, 400)
     cv2.imwrite(out_dir / 'tem_contour.png', tem_contour)
+
+    # flm_contour = create_edge_flm(flm_cropped_refl_path, 0, 0)
+    # cv2.imwrite(out_dir / 'flm_contour.png', flm_contour)

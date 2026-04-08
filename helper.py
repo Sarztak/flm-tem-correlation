@@ -138,7 +138,36 @@ def create_edge_tem(path: Path, threshold1=100, threshold2=200) -> np.array:
     
     largest = max(contours, key=cv2.contourArea)
     mask = np.zeros_like(tem_downsampled)
-    mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=1)
+    mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=2)
     return mask_with_contour
 
 
+def create_edge_flm(path: Path, threshold1: int = 100, threshold2: int = 200) -> np.array:
+    flm_img = load_image(path)
+
+    # make into B&W image
+    if len(flm_img.shape) == 3:
+        flm_img = cv2.cvtColor(flm_img, cv2.COLOR_RGB2GRAY)
+    
+    # flm_img = 255 - flm_img # invert the image
+
+    # then find the edges using canny filter
+    edges = cv2.Canny(
+        flm_img, threshold1=threshold1, threshold2=threshold2
+    )
+
+    kernel = np.ones((1, 1), np.uint8)
+    edges_dilated = cv2.dilate(edges, kernel, iterations=1)
+
+    # find the contours
+    contours, _ = cv2.findContours(
+        edges_dilated, 
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+    
+    cv2.imwrite('./output/edges_flm.png', edges_dilated)
+    largest = max(contours, key=cv2.contourArea)
+    mask = np.zeros_like(flm_img)
+    mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=1)
+    return mask_with_contour
