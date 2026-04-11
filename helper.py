@@ -1,11 +1,12 @@
 # alignment_helpers.py
 import numpy as np
-from skimage import io
+from skimage import io, measure
 from scipy import ndimage
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 from pathlib import Path
 import cv2
+from skimage.filters import threshold_otsu
 
 def load_image(path):
     img = io.imread(path)
@@ -171,3 +172,161 @@ def create_edge_flm(path: Path, threshold1: int = 100, threshold2: int = 200) ->
     mask = np.zeros_like(flm_img)
     mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=1)
     return mask_with_contour
+
+def find_roi_bl_gr(img_flm, img_tem):
+
+    # for this particular example flm_pixel dimensions are 121 x 121 x 121 nm^3
+    # and tem_pixel dimensions are 6.9 x 6.9 x 6.9 nm^3
+    flm_pixel_nm = 121
+    tem_pixel_nm = 6.9
+
+    # scaling means how many pixel of flm needs to make one pixel or tem which is of quite a high resolution. say x length takes x / 121 pixels flm in and x / 6.9 pixels in tem then question is how many flm pixel do I need more to fill up one tem pixel ? that would be (x / 6.9) / (x / 121) so magnification is a simple way is asking how many flm pixels do I need to repeat to make up the same thing that tem cover at a much higher resolution; I had a hard time understading this, and still don't fully appreciate what I am doing.
+    scale_factor = flm_pixel_nm / tem_pixel_nm
+
+    # finding the region of interest based on the green and blue channels
+    # green = 0, blue = 2, reflection = 1
+    # here the tiff image is needed
+    green = img_flm[0]
+    blue = img_flm[2]
+
+    bl_gr = green.astype(float) + blue.astype(float) # conversion to float is needed because other wise int will overflow - 16 bit can only hold 2^16 - 1 integers; anything more than that will overflow
+
+    thresh = threshold_otsu(bl_gr)
+    roi_mask = (bl_gr > thresh).astype(int)
+
+    # find the bounding box of roi 
+    # regionprops just pulls out properties of connected regions - area, centroid, bounding box, perimeter
+    # it expects a labelled image meaning an array where each pixel has a number which indicates to which region it belongs to
+    # for this the roi_mask needs to be passed through measure.label
+    labelled = measure.label(roi_mask, connectivity=2)
+    props = measure.regionprops(labelled) # 2 means 8 diagonal connection in addition to up down left and right in 2d
+    bboxes = [p.bbox for p in props] # each bbox is (min_row, min_col, max_row, max_col)
+
+    # the area of interest needs to be padded by at least one tem dimension so that the search region includes the tem image
+
+    tem_height_px, tem_width_px = img_tem.shape
+    tem_height_nm = tem_height_px * tem_pixel_nm
+    tem_width_nm = tem_width_px * tem_pixel_nm
+
+    # convert in terms of flm pixels
+    tem_height_flm = tem_height_nm / flm_pixel_nm
+    tem_width_flm = tem_width_nm / flm_pixel_nm
+
+
+    # pad in x and y
+    pad_y = int(tem_height_flm)
+    pad_x = int(tem_width_flm)
+
+    search_regions = []
+    for b in bboxes:
+        min_row, min_col, max_row, max_col = b
+
+        min_row_padded = max(0, min_row - pad_y)
+        min_col_padded = max(0, min_col - pad_x)
+        max_row_padded = min(img_flm.shape[1], max_row + pad_y)
+        max_col_padded = min(img_flm.shape[2], max_col + pad_x)
+
+        # now take the crop of the regions and store them
+        crop = img_flm[:, min_row_padded: max_row_padded, min_col_padded: max_col_padded]
+        search_regions.append(crop)
+
+    return search_regions
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
