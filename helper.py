@@ -1,6 +1,7 @@
 # alignment_helpers.py
 import numpy as np
 from skimage import io, measure
+from skimage.morphology import binary_dilation, disk
 from PIL import Image
 from scipy import ndimage
 from scipy.optimize import minimize
@@ -184,6 +185,21 @@ def find_roi_bl_gr(img_flm, img_tem, pad_factor=10):
     # scaling means how many pixel of flm needs to make one pixel or tem which is of quite a high resolution. say x length takes x / 121 pixels flm in and x / 6.9 pixels in tem then question is how many flm pixel do I need more to fill up one tem pixel ? that would be (x / 6.9) / (x / 121) so magnification is a simple way is asking how many flm pixels do I need to repeat to make up the same thing that tem cover at a much higher resolution; I had a hard time understading this, and still don't fully appreciate what I am doing.
     scale_factor = flm_pixel_nm / tem_pixel_nm
 
+    # the area of interest needs to be padded by at least one tem dimension so that the search region includes the tem image
+
+    tem_height_px, tem_width_px = img_tem.shape[:2]
+    tem_height_nm = tem_height_px * tem_pixel_nm
+    tem_width_nm = tem_width_px * tem_pixel_nm
+
+    # convert in terms of flm pixels
+    tem_height_flm = tem_height_nm / flm_pixel_nm
+    tem_width_flm = tem_width_nm / flm_pixel_nm
+
+
+    # pad in x and y
+    pad_y = int(tem_height_flm) * pad_factor
+    pad_x = int(tem_width_flm) * pad_factor
+
     # finding the region of interest based on the green and blue channels
     # green = 0, blue = 2, reflection = 1
     # here the tiff image is needed
@@ -199,24 +215,18 @@ def find_roi_bl_gr(img_flm, img_tem, pad_factor=10):
     # regionprops just pulls out properties of connected regions - area, centroid, bounding box, perimeter
     # it expects a labelled image meaning an array where each pixel has a number which indicates to which region it belongs to
     # for this the roi_mask needs to be passed through measure.label
-    labelled = measure.label(roi_mask, connectivity=2)
+
+    # merge radius in FLM pixels
+    breakpoint()
+    merge_radius = int(pad_factor * max(tem_height_flm, tem_width_flm))
+
+    # dilate the mask by that radius - regions within merge_radius of each other will merge
+    # disk defines the shape of structing element - a circular disk of that radius
+    dilated_mask = binary_dilation(roi_mask, disk(merge_radius))
+
+    labelled = measure.label(dilated_mask, connectivity=2)
     props = measure.regionprops(labelled) # 2 means 8 diagonal connection in addition to up down left and right in 2d
     bboxes = [p.bbox for p in props] # each bbox is (min_row, min_col, max_row, max_col)
-
-    # the area of interest needs to be padded by at least one tem dimension so that the search region includes the tem image
-
-    tem_height_px, tem_width_px = img_tem.shape[:2]
-    tem_height_nm = tem_height_px * tem_pixel_nm
-    tem_width_nm = tem_width_px * tem_pixel_nm
-
-    # convert in terms of flm pixels
-    tem_height_flm = tem_height_nm / flm_pixel_nm
-    tem_width_flm = tem_width_nm / flm_pixel_nm
-
-
-    # pad in x and y
-    pad_y = int(tem_height_flm) * pad_factor
-    pad_x = int(tem_width_flm) * pad_factor
 
     search_regions = []
     for b in bboxes:
