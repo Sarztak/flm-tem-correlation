@@ -1,6 +1,7 @@
 # alignment_helpers.py
 import numpy as np
 from skimage import io, measure
+from PIL import Image
 from scipy import ndimage
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
@@ -173,8 +174,8 @@ def create_edge_flm(path: Path, threshold1: int = 100, threshold2: int = 200) ->
     mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=1)
     return mask_with_contour
 
-def find_roi_bl_gr(img_flm, img_tem):
-
+def find_roi_bl_gr(img_flm, img_tem, pad_factor=10):
+    # pad_factor mean pad the image by 10 times more than the tem_width and tem_height in nm 
     # for this particular example flm_pixel dimensions are 121 x 121 x 121 nm^3
     # and tem_pixel dimensions are 6.9 x 6.9 x 6.9 nm^3
     flm_pixel_nm = 121
@@ -186,8 +187,8 @@ def find_roi_bl_gr(img_flm, img_tem):
     # finding the region of interest based on the green and blue channels
     # green = 0, blue = 2, reflection = 1
     # here the tiff image is needed
-    green = img_flm[0]
-    blue = img_flm[2]
+    green = img_flm[:, :, 0]
+    blue = img_flm[:, :, 2]
 
     bl_gr = green.astype(float) + blue.astype(float) # conversion to float is needed because other wise int will overflow - 16 bit can only hold 2^16 - 1 integers; anything more than that will overflow
 
@@ -204,7 +205,7 @@ def find_roi_bl_gr(img_flm, img_tem):
 
     # the area of interest needs to be padded by at least one tem dimension so that the search region includes the tem image
 
-    tem_height_px, tem_width_px = img_tem.shape
+    tem_height_px, tem_width_px = img_tem.shape[:2]
     tem_height_nm = tem_height_px * tem_pixel_nm
     tem_width_nm = tem_width_px * tem_pixel_nm
 
@@ -214,8 +215,8 @@ def find_roi_bl_gr(img_flm, img_tem):
 
 
     # pad in x and y
-    pad_y = int(tem_height_flm)
-    pad_x = int(tem_width_flm)
+    pad_y = int(tem_height_flm) * pad_factor
+    pad_x = int(tem_width_flm) * pad_factor
 
     search_regions = []
     for b in bboxes:
@@ -223,110 +224,32 @@ def find_roi_bl_gr(img_flm, img_tem):
 
         min_row_padded = max(0, min_row - pad_y)
         min_col_padded = max(0, min_col - pad_x)
-        max_row_padded = min(img_flm.shape[1], max_row + pad_y)
-        max_col_padded = min(img_flm.shape[2], max_col + pad_x)
+        max_row_padded = min(img_flm.shape[0], max_row + pad_y)
+        max_col_padded = min(img_flm.shape[1], max_col + pad_x)
 
         # now take the crop of the regions and store them
-        crop = img_flm[:, min_row_padded: max_row_padded, min_col_padded: max_col_padded]
+        crop = img_flm[min_row_padded: max_row_padded, min_col_padded: max_col_padded]
         search_regions.append(crop)
 
     return search_regions
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    jey_002_g3_l3_path = Path('./jey_002_g3_l3')
+    tem_img_path = jey_002_g3_l3_path / "JEY002_G3_L3_1950x_t-13.tif"
+    flm_cropped_refl_path = jey_002_g3_l3_path / "FLM-JEY002_G3_L3_z11_refl_cropped.tif"
+    flm_grb_path = jey_002_g3_l3_path / "FLM-stack_JEY002_G3_L3.tif" # stacked image of green, reflection, blue channel
+
+    img_tem = load_image(tem_img_path)
+    # select the 11th channel for testing because that is cleanest
+    flm_grb_img = load_image(flm_grb_path) # shape = 21, 2000, 2000, 3 -> z, x, y, c
+    flm_c11 = flm_grb_img[10]
+
+    search_regions = find_roi_bl_gr(flm_c11, img_tem, pad_factor=2)
+    out_dir = Path('./output')
+    search_regions_dir = out_dir / 'search_regions'
+    search_regions_dir.mkdir(exist_ok=True)
+    for i, sr, in enumerate(search_regions):
+        # need to convert uint16 to unint8 since pil does not handle uint16
+        sr = ((sr - sr.min()) / (sr.max() - sr.min()) * 255).astype(np.uint8)
+        img = Image.fromarray(sr)
+        img.save(search_regions_dir / f'{str(i).zfill(4)}.png')
