@@ -1,7 +1,6 @@
 # alignment_helpers.py
 import numpy as np
 from skimage import io, measure
-from skimage.morphology import binary_dilation, disk
 from PIL import Image
 from scipy import ndimage
 from scipy.optimize import minimize
@@ -175,7 +174,28 @@ def create_edge_flm(path: Path, threshold1: int = 100, threshold2: int = 200) ->
     mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=1)
     return mask_with_contour
 
-def find_roi_bl_gr(img_flm, img_tem, pad_factor=10):
+def merge_bboxes(bboxes, tem_height_flm, tem_width_flm):
+    # the technique is just expansing of classical merge interval problems where
+    # there is one more check on the overlapping columns not just rows
+    merge_dist = int(max(tem_height_flm, tem_width_flm))
+    
+    # expand each bbox by merge_dist before merging
+    expanded = [(r0 - merge_dist, c0 - merge_dist, r1 + merge_dist, c1 + merge_dist) 
+                for r0, c0, r1, c1 in bboxes]
+
+    # sort the intervals
+    expanded.sort(key=lambda x: x[0])
+
+    merged = [expanded[0]]
+    for r0, c0, r1, c1 in expanded[1:]:
+        pr0, pc0, pr1, pc1 = merged[-1]
+        if r0 <= pr1 and c0 <= pc1:  # overlaps condition in row and column
+            merged[-1] = (min(pr0, r0), min(pc0, c0), max(pr1, r1), max(pc1, c1))
+        else:
+            merged.append((r0, c0, r1, c1))
+    return merged
+
+def find_roi_bl_gr(img_flm, img_tem, pad_factor=2):
     # pad_factor mean pad the image by 10 times more than the tem_width and tem_height in nm 
     # for this particular example flm_pixel dimensions are 121 x 121 x 121 nm^3
     # and tem_pixel dimensions are 6.9 x 6.9 x 6.9 nm^3
@@ -199,7 +219,7 @@ def find_roi_bl_gr(img_flm, img_tem, pad_factor=10):
     # pad in x and y
     pad_y = int(tem_height_flm) * pad_factor
     pad_x = int(tem_width_flm) * pad_factor
-
+    # pad_x, pad_y = 0, 0
     # finding the region of interest based on the green and blue channels
     # green = 0, blue = 2, reflection = 1
     # here the tiff image is needed
@@ -215,21 +235,15 @@ def find_roi_bl_gr(img_flm, img_tem, pad_factor=10):
     # regionprops just pulls out properties of connected regions - area, centroid, bounding box, perimeter
     # it expects a labelled image meaning an array where each pixel has a number which indicates to which region it belongs to
     # for this the roi_mask needs to be passed through measure.label
-
-    # merge radius in FLM pixels
-    breakpoint()
-    merge_radius = int(pad_factor * max(tem_height_flm, tem_width_flm))
-
-    # dilate the mask by that radius - regions within merge_radius of each other will merge
-    # disk defines the shape of structing element - a circular disk of that radius
-    dilated_mask = binary_dilation(roi_mask, disk(merge_radius))
-
-    labelled = measure.label(dilated_mask, connectivity=2)
+    labelled = measure.label(roi_mask, connectivity=2)
     props = measure.regionprops(labelled) # 2 means 8 diagonal connection in addition to up down left and right in 2d
     bboxes = [p.bbox for p in props] # each bbox is (min_row, min_col, max_row, max_col)
 
+    # merge all the bounding boxes 
+    merged_bboxes = merge_bboxes(bboxes, tem_height_flm, tem_width_flm)
+
     search_regions = []
-    for b in bboxes:
+    for b in merged_bboxes:
         min_row, min_col, max_row, max_col = b
 
         min_row_padded = max(0, min_row - pad_y)
@@ -242,6 +256,7 @@ def find_roi_bl_gr(img_flm, img_tem, pad_factor=10):
         search_regions.append(crop)
 
     return search_regions
+
 
 if __name__ == "__main__":
     jey_002_g3_l3_path = Path('./jey_002_g3_l3')
