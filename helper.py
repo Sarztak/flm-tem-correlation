@@ -1,6 +1,6 @@
 # alignment_helpers.py
 import numpy as np
-from skimage import io, measure
+from skimage import io, measure, exposure
 from PIL import Image
 from scipy import ndimage
 from scipy.optimize import minimize
@@ -252,10 +252,39 @@ def find_roi_bl_gr(img_flm, img_tem, pad_factor=2):
         max_col_padded = min(img_flm.shape[1], max_col + pad_x)
 
         # now take the crop of the regions and store them
-        crop = img_flm[min_row_padded: max_row_padded, min_col_padded: max_col_padded]
+        crop = img_flm[min_row_padded: max_row_padded, min_col_padded: max_col_padded, 1]
         search_regions.append(crop)
 
     return search_regions
+
+def get_tile(flm_img, x_start, y_start, tile_w, tile_h):
+    crop = flm_img[y_start:y_start+tile_h, x_start:x_start+tile_w]
+    crop = (crop * 255).astype(np.uint8)
+    crop = np.stack([crop] * 3, axis=-1)
+    return crop
+
+def tile_flm(flm_img, tem_img, flm_pixel_nm=121, tem_pixel_nm=6.9, tile_scale=2, use_hist_eq=True):
+    tem_height_px, tem_width_px = tem_img.shape[:2]
+
+    # the tiles are scaled so that crops are not too tight and miss relevant portions
+    tile_h = int((tem_height_px * tem_pixel_nm) / flm_pixel_nm) * tile_scale
+    tile_w = int((tem_width_px * tem_pixel_nm) / flm_pixel_nm) * tile_scale
+    step_y = tile_h // 2
+    step_x = tile_w // 2
+    h, w = flm_img.shape[:2]
+
+    # hist eq is needed to get sharper images
+    if use_hist_eq:
+        flm_img = exposure.equalize_hist(flm_img[:, :, 0])
+
+    tiles = []
+    for y in range(0, h, step_y):
+        for x in range(0, w, step_x):
+            if y + tile_h > h or x + tile_w > w:
+                continue
+            crop = get_tile(flm_img, x, y, tile_w, tile_h)
+            tiles.append({'crop': crop, 'origin': (x, y)})
+    return tiles
 
 
 if __name__ == "__main__":
@@ -276,5 +305,6 @@ if __name__ == "__main__":
     for i, sr, in enumerate(search_regions):
         # need to convert uint16 to unint8 since pil does not handle uint16
         sr = ((sr - sr.min()) / (sr.max() - sr.min()) * 255).astype(np.uint8)
+        sr = np.stack([sr] * 3, axis=-1)
         img = Image.fromarray(sr)
         img.save(search_regions_dir / f'{str(i).zfill(4)}.png')

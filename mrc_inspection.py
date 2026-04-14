@@ -1,8 +1,10 @@
 import mrcfile
+from PIL import Image
+from skimage import exposure
 import numpy as np 
 import cv2
 from pathlib import Path
-from helper import load_image, create_edge_tem, create_edge_flm
+from helper import load_image, create_edge_tem, create_edge_flm, tile_flm
 
 """
 the .st file is 4096 x 4096 numpy array so it has only the intensity information
@@ -48,14 +50,31 @@ if __name__ == "__main__":
     jey_002_g3_l3_path = Path('./jey_002_g3_l3')
     tem_img_path = jey_002_g3_l3_path / "JEY002_G3_L3_1950x_t-13.tif"
     flm_cropped_refl_path = jey_002_g3_l3_path / "FLM-JEY002_G3_L3_z11_refl_cropped.tif"
+    flm_refl_path = jey_002_g3_l3_path / "FLM-JEY002_G3_L3_z11_refl.tif"
+    flm_stack_path = jey_002_g3_l3_path / "FLM-stack_JEY002_G3_L3.tif"
 
     out_dir = Path('./output')
 
-    tem_contour = create_edge_tem(tem_img_path, 300, 400)
-    cv2.imwrite(out_dir / 'tem_contour.png', tem_contour)
+    # tem_contour = create_edge_tem(tem_img_path, 300, 400)
+    # cv2.imwrite(out_dir / 'tem_contour.png', tem_contour)
 
     # flm_contour = create_edge_flm(flm_cropped_refl_path_2, 30, 50)
     # cv2.imwrite(out_dir / 'flm_contour.png', flm_contour)
+    tem_img = load_image(tem_img_path)
 
-    flm_img = load_image(flm_cropped_refl_path)
-    match_sift_keypoints(tem_contour, flm_img)
+    # folder where search_regions are stored
+    for img_path in (out_dir / 'search_regions').glob("*.png"):
+        flm_img = load_image(img_path)
+
+        tiles = tile_flm(flm_img, tem_img, tile_scale=2)
+
+        tiles_dir = out_dir / 'tiles'
+        tiles_dir.mkdir(exist_ok=True)
+        for i, tile in enumerate(tiles):
+            img = Image.fromarray(tile['crop'])
+            img.save(tiles_dir / f'{img_path.stem}_{str(i).zfill(4)}.png')
+    # crop_flm_center(flm_img, tem_img)
+
+    
+    # breakpoint()
+    # match_sift_keypoints(tem_contour, flm_img)
