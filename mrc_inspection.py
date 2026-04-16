@@ -63,18 +63,8 @@ if __name__ == "__main__":
     tem_img = load_image(tem_img_path)
 
     # folder where search_regions are stored
-    for img_path in (out_dir / 'search_regions').glob("*.png"):
-        flm_img = load_image(img_path)
-
-        tiles = tile_flm(flm_img, tem_img, tile_scale=2)
-
-        tiles_dir = out_dir / 'tiles'
-        tiles_dir.mkdir(exist_ok=True)
-        for i, tile in enumerate(tiles):
-            img = Image.fromarray(tile['crop'])
-            img.save(tiles_dir / f'{img_path.stem}_{str(i).zfill(4)}.png')
     # crop_flm_center(flm_img, tem_img)
 
-    
+        
     # breakpoint()
     # match_sift_keypoints(tem_contour, flm_img)

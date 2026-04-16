@@ -174,6 +174,18 @@ def create_edge_flm(path: Path, threshold1: int = 100, threshold2: int = 200) ->
     mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=1)
     return mask_with_contour
 
+def tile_search_region(img_path, tem_img):
+    for img_path in (img_path).glob("*.png"):
+        flm_img = load_image(img_path)
+
+        tiles = tile_flm(flm_img, tem_img, tile_scale=2)
+
+        tiles_dir = out_dir / 'tiles'
+        tiles_dir.mkdir(exist_ok=True)
+        for i, tile in enumerate(tiles):
+            img = Image.fromarray(tile['crop'])
+            img.save(tiles_dir / f'{img_path.stem}_{str(i).zfill(4)}.png')
+
 def merge_bboxes(bboxes, tem_height_flm, tem_width_flm):
     # the technique is just expansing of classical merge interval problems where
     # there is one more check on the overlapping columns not just rows
