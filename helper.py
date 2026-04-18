@@ -174,6 +174,36 @@ def create_edge_flm(path: Path, threshold1: int = 100, threshold2: int = 200) ->
     mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=1)
     return mask_with_contour
 
+def close_edges_flm(path):
+
+    # Load the image in grayscale
+    img = cv2.imread(path, 0)
+
+    # 1. Close the figure
+    # A 3x3 or 5x5 kernel helps bridge gaps in the lines
+    kernel = np.ones((3,3), np.uint8)
+    closed_edges = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    # 2. Remove Fringe Edges
+    # Find all contours in the edge map
+    contours, _ = cv2.findContours(closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Create a blank canvas for the cleaned edges
+    clean_edges = np.zeros_like(img)
+
+    # Threshold for 'fringe': filter by length (arc length) or area
+    min_edge_length = 50 
+
+    for cnt in contours:
+        if cv2.arcLength(cnt, False) > min_edge_length:
+            cv2.drawContours(clean_edges, [cnt], -1, 255, thickness=1)
+
+    # 3. Final 'Thinning' (Optional)
+    # If closing made the lines too thick, use skeletonization or a simple erosion
+    final_output = cv2.erode(clean_edges, kernel, iterations=1)
+
+    cv2.imwrite('refined_edges.png', final_output)
+
 def tile_search_region(img_path, tem_img):
     for img_path in (img_path).glob("*.png"):
         flm_img = load_image(img_path)
