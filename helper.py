@@ -115,20 +115,9 @@ def create_edge_tem(path: Path, threshold1=100, threshold2=200) -> np.array:
     if len(tem_img.shape) == 3:
         tem_img = cv2.cvtColor(tem_img, cv2.COLOR_RGB2GRAY)
 
-    # shrink the size by about 8x
-    h, w = tem_img.shape 
-
-    # downsample using INTER_AREA that averages all the pixels in the source region to the output pixel if shrinking by 8x then a block of 8x8 is mapped to a single pixel in the output pixel
-
-    tem_downsampled = cv2.resize(
-        tem_img,
-        (w // 8, h // 8),
-        interpolation=cv2.INTER_AREA,
-    )
-
     # then find the edges using canny filter
     edges = cv2.Canny(
-        tem_downsampled, threshold1=threshold1, threshold2=threshold2
+        tem_img, threshold1=threshold1, threshold2=threshold2
     )
 
     # find the contours
@@ -138,9 +127,9 @@ def create_edge_tem(path: Path, threshold1=100, threshold2=200) -> np.array:
         cv2.CHAIN_APPROX_SIMPLE
     )
     
-    largest = max(contours, key=cv2.contourArea)
-    mask = np.zeros_like(tem_downsampled)
-    mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=2)
+    # largest = max(contours, key=cv2.contourArea)
+    mask = np.zeros_like(tem_img)
+    mask_with_contour = cv2.drawContours(mask, contours, -1, 255, thickness=5)
     return mask_with_contour
 
 
@@ -169,9 +158,9 @@ def create_edge_flm(path: Path, threshold1: int = 100, threshold2: int = 200) ->
     )
     
     cv2.imwrite('./output/edges_flm.png', edges_dilated)
-    largest = max(contours, key=cv2.contourArea)
+    # largest = max(contours, key=cv2.contourArea)
     mask = np.zeros_like(flm_img)
-    mask_with_contour = cv2.drawContours(mask, [largest], -1, 255, thickness=1)
+    mask_with_contour = cv2.drawContours(mask, contours, -1, 255, thickness=2)
     return mask_with_contour
 
 def close_edges_flm(path):
@@ -198,8 +187,6 @@ def close_edges_flm(path):
         if cv2.arcLength(cnt, False) > min_edge_length:
             cv2.drawContours(clean_edges, [cnt], -1, 255, thickness=1)
 
-    # 3. Final 'Thinning' (Optional)
-    # If closing made the lines too thick, use skeletonization or a simple erosion
     final_output = cv2.erode(clean_edges, kernel, iterations=1)
 
     cv2.imwrite('refined_edges.png', final_output)

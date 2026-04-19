@@ -4,7 +4,7 @@ from skimage import exposure
 import numpy as np 
 import cv2
 from pathlib import Path
-from helper import load_image, create_edge_tem, create_edge_flm, tile_flm
+from helper import load_image, create_edge_tem, create_edge_flm, tile_flm, close_edges_flm
 
 """
 the .st file is 4096 x 4096 numpy array so it has only the intensity information
@@ -55,12 +55,14 @@ if __name__ == "__main__":
 
     out_dir = Path('./output')
 
-    # tem_contour = create_edge_tem(tem_img_path, 300, 400)
-    # cv2.imwrite(out_dir / 'tem_contour.png', tem_contour)
+    tem_contour = create_edge_tem(tem_img_path, 100, 150)
+    # breakpoint()
+    cv2.imwrite(out_dir / 'tem_contour.png', tem_contour)
 
-    # flm_contour = create_edge_flm(flm_cropped_refl_path_2, 30, 50)
-    # cv2.imwrite(out_dir / 'flm_contour.png', flm_contour)
-    tem_img = load_image(tem_img_path)
+    flm_contour = create_edge_flm(out_dir / '0001_0080.png', 100, 150)
+    # close_edges_flm(out_dir / 'edges_flm.png')
+    cv2.imwrite(out_dir / 'flm_contour.png', flm_contour)
+    # tem_img = load_image(tem_img_path)
 
     # folder where search_regions are stored
     # crop_flm_center(flm_img, tem_img)
