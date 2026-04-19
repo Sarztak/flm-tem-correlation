@@ -201,6 +201,7 @@ def tile_search_region(img_path, tem_img):
         tiles_dir.mkdir(exist_ok=True)
         for i, tile in enumerate(tiles):
             img = Image.fromarray(tile['crop'])
+            centers = tile['origin']
             img.save(tiles_dir / f'{img_path.stem}_{str(i).zfill(4)}.png')
 
 def merge_bboxes(bboxes, tem_height_flm, tem_width_flm):
@@ -293,6 +294,8 @@ def get_tile(flm_img, x_start, y_start, tile_w, tile_h):
     return crop
 
 def tile_flm(flm_img, tem_img, flm_pixel_nm=121, tem_pixel_nm=6.9, tile_scale=2, use_hist_eq=True):
+    if len(flm_img.shape) == 3:
+        flm_img = flm_img[:, :, 0] # select just one channel if the img is reflection else keep it gray scale
     tem_height_px, tem_width_px = tem_img.shape[:2]
 
     # the tiles are scaled so that crops are not too tight and miss relevant portions
@@ -304,7 +307,7 @@ def tile_flm(flm_img, tem_img, flm_pixel_nm=121, tem_pixel_nm=6.9, tile_scale=2,
 
     # hist eq is needed to get sharper images
     if use_hist_eq:
-        flm_img = exposure.equalize_hist(flm_img[:, :, 0])
+        flm_img = exposure.equalize_hist(flm_img)
 
     tiles = []
     for y in range(0, h, step_y):
@@ -314,6 +317,52 @@ def tile_flm(flm_img, tem_img, flm_pixel_nm=121, tem_pixel_nm=6.9, tile_scale=2,
             crop = get_tile(flm_img, x, y, tile_w, tile_h)
             tiles.append({'crop': crop, 'origin': (x, y)})
     return tiles
+
+
+def process_search_regions(search_regions_dir, tem_img):
+    all_crops = []
+    all_origins = []
+
+    for search_region in search_regions_dir.glob("*.png"):
+        # Read the search region as grayscale
+        flm_img = cv2.imread(str(search_region), cv2.IMREAD_GRAYSCALE)
+        
+        # Get the tiled crops and their origins
+        tiles = tile_flm(flm_img, tem_img) 
+        
+        for tile in tiles:
+            crop = tile['crop']  # Get the cropped image
+            origin = tile['origin']  # Get the origin
+            
+            all_crops.append(crop)
+            all_origins.append(origin)
+
+    # Convert lists to numpy arrays
+    crops_array = np.array(all_crops)
+    origins_array = np.array(all_origins)
+
+    return crops_array, origins_array
+
+def filter_with_threshold(img, threshold=130, connectivity=2):
+    binary = (img > threshold).astype(np.uint8) * 255
+
+    labelled = measure.label(binary, connectivity=connectivity)
+    props = measure.regionprops(labelled)
+
+    # sort by area, take the largest
+    props_sorted = sorted(props, key=lambda p: p.area, reverse=True)
+    largest = props_sorted[0]
+
+    # create mask of just the largest component
+    clean_mask = (labelled == largest.label).astype(np.uint8) * 255
+
+    return clean_mask
+
+
+
+
+
+
 
 
 if __name__ == "__main__":

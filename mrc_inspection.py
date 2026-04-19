@@ -4,7 +4,7 @@ from skimage import exposure
 import numpy as np 
 import cv2
 from pathlib import Path
-from helper import load_image, create_edge_tem, create_edge_flm, tile_flm, close_edges_flm
+from helper import load_image, create_edge_tem, create_edge_flm, tile_flm, close_edges_flm, tile_search_region, process_search_regions, filter_with_threshold
 
 """
 the .st file is 4096 x 4096 numpy array so it has only the intensity information
@@ -70,3 +70,22 @@ if __name__ == "__main__":
         
     # breakpoint()
     # match_sift_keypoints(tem_contour, flm_img)
+
+    # --------------------------------------------------------------------#
+    # need to store the centers of the tem_files
+
+    search_regions_dir = out_dir / 'search_regions'
+    tem_img = cv2.imread(tem_img_path, 0) # read as gray scale
+    crops_array, origins_array = process_search_regions(search_regions_dir, tem_img)
+
+    # Save to .npy files
+    np.save(out_dir / 'crops.npy', crops_array)
+    np.save(out_dir / 'origins.npy', origins_array)
+    # --------------------------------------------------------------------#
+
+    # next filter out the regions by threshold
+    contrast_filter_array = np.array([filter_with_threshold(img) for img in crops_array])
+
+    np.save(out_dir / 'constrast_filtered.npy', contrast_filter_array)
+
+
