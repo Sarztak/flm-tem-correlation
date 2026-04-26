@@ -90,8 +90,8 @@ canvas { position: absolute; top: 0; left: 0; }
       </div>
       <div class="row">
         <span class="lbl">peaks</span>
-        <input type="range" id="hPeaks" min="2" max="10" value="5" step="1">
-        <span class="val" id="hPeaksVal">5</span>
+        <input type="range" id="hPeaks" min="100" max="500" value="200" step="50">
+        <span class="val" id="hPeaksVal">200</span>
       </div>
       <button class="btn accent" id="autoRotBtn" style="margin-top:4px">detect lines &amp; auto-rotate</button>
       <div class="hough-result" id="houghResult" style="display:none">
@@ -277,43 +277,45 @@ function houghTransform(edges, w, h, nTheta=180){
   return {acc, thetas, nRho, diag};
 }
 
-function findPeaks(acc, thetas, nRho, nPeaks, minDist=20){
+// in findPeaks, suppress only rho around the peak, not angle
+// so many peaks at the same angle but different rho are all kept
+function findPeaks(acc, thetas, nRho, nPeaks, minRhoDist=20){
   const copy=new Int32Array(acc);
   const peaks=[];
   for(let p=0;p<nPeaks;p++){
-    let best=0, bt=0, br=0;
+    let best=0,bt=0,br=0;
     for(let t=0;t<thetas.length;t++) for(let r=0;r<nRho;r++){
-      if(copy[t*nRho+r]>best){ best=copy[t*nRho+r]; bt=t; br=r; }
+      if(copy[t*nRho+r]>best){best=copy[t*nRho+r];bt=t;br=r;}
     }
-    if(best===0) break;
-    peaks.push({theta:thetas[bt], rho:br, votes:best});
-    for(let t=Math.max(0,bt-minDist);t<Math.min(thetas.length,bt+minDist);t++)
-      for(let r=Math.max(0,br-minDist);r<Math.min(nRho,br+minDist);r++)
-        copy[t*nRho+r]=0;
+    if(best===0)break;
+    peaks.push({theta:thetas[bt],rho:br,votes:best});
+    // suppress only rho dimension around peak, keep other angles free
+    for(let r=Math.max(0,br-minRhoDist);r<Math.min(nRho,br+minRhoDist);r++)
+      copy[bt*nRho+r]=0;
   }
   return peaks;
 }
 
-function dominantAngle(peaks){
-  // group by angle within 5 deg tol, return mean of largest group
-  const degs=peaks.map(p=>p.theta*180/Math.PI);
-  const sorted=[...degs].sort((a,b)=>a-b);
-  let bestGroup=[], curGroup=[sorted[0]];
+function groupLines(lines, tol=5){
+  const sorted=[...lines].sort((a,b)=>a-b);
+  const groups=[[sorted[0]]];
   for(let i=1;i<sorted.length;i++){
-    if(Math.abs(sorted[i]-sorted[i-1])<5) curGroup.push(sorted[i]);
-    else{ if(curGroup.length>bestGroup.length) bestGroup=curGroup; curGroup=[sorted[i]]; }
+    if(Math.abs(sorted[i]-sorted[i-1])>tol) groups.push([sorted[i]]);
+    else groups[groups.length-1].push(sorted[i]);
   }
-  if(curGroup.length>bestGroup.length) bestGroup=curGroup;
-  return bestGroup.reduce((a,b)=>a+b,0)/bestGroup.length;
+  const largest=groups.sort((a,b)=>b.length-a.length)[0];
+  return largest.reduce((a,b)=>a+b,0)/largest.length;
 }
 
-function runHough(img, sigma, thresh, nPeaks){
+function runPipeline(img, sigma, thresh, nPeaks){
   const {gray,w,h}=imgToGrayscaleArray(img,300);
   const blurred=gaussianBlur(gray,w,h,sigma);
   const edges=sobelEdges(blurred,w,h,thresh*0.5,thresh);
   const {acc,thetas,nRho}=houghTransform(edges,w,h,180);
   const peaks=findPeaks(acc,thetas,nRho,nPeaks);
-  return {peaks, dominantDeg:dominantAngle(peaks)};
+  const degs=peaks.map(p => p.theta * 180 / Math.PI);
+  const dominantDeg = groupLines(degs);
+  return {peaks, dominantDeg:dominantDeg};
 }
 
 // ── Auto-rotate ───────────────────────────────────────────────────────────────
@@ -328,16 +330,14 @@ document.getElementById('autoRotBtn').addEventListener('click', ()=>{
       const thresh=parseFloat(document.getElementById('hThresh').value);
       const nPeaks=parseInt(document.getElementById('hPeaks').value);
 
-      const flmR=runHough(flmImg,sigma,thresh,nPeaks);
-      const temR=runHough(temImg,sigma,thresh,nPeaks);
+      const flmR=runPipeline(flmImg,sigma,thresh,nPeaks);
+      const temR=runPipeline(temImg,sigma,thresh,nPeaks);
 
+      console.log(flmR, temR);
       const flmDeg=flmR.dominantDeg;
       const temDeg=temR.dominantDeg;
       let delta=temDeg-flmDeg;
 
-      // clamp to [-180,180]
-      while(delta>180) delta-=180;
-      while(delta<-180) delta+=180;
 
       // apply to coarse rotation slider
       rotC=Math.round(delta);
@@ -377,6 +377,19 @@ function resize(){
   draw();
 }
 
+function getFlippedImg(img){
+  if(!flipH && !flipV) return img;
+  const c=document.createElement('canvas');
+  c.width=img.width; c.height=img.height;
+  const x=c.getContext('2d');
+  x.translate(flipH?img.width:0, flipV?img.height:0);
+  x.scale(flipH?-1:1, flipV?-1:1);
+  x.drawImage(img,0,0);
+  const flipped=new Image();
+  flipped.src=c.toDataURL();
+  return flipped;
+}
+
 function colorizeAndBlend(){
   const cx=W/2, cy=H/2;
   const ts=Math.min(W/temImg.width,H/temImg.height)*0.85;
@@ -395,14 +408,31 @@ function colorizeAndBlend(){
   // FLM → transform → green offscreen
   const fC=document.createElement('canvas'); fC.width=W; fC.height=H;
   const fX=fC.getContext('2d');
-  const r=getTotalRot()*Math.PI/180, s=getTotalSc();
-  const cos=Math.cos(r), sin=Math.sin(r);
+  
   fX.save();
-  fX.transform(s*cos,s*sin,-s*sin,s*cos,cx+tx,cy+ty);
-  const fs=Math.min(W/flmImg.width,H/flmImg.height)*0.85;
-  fX.scale(flipH?-1:1,flipV?-1:1);
-  fX.drawImage(flmImg,-flmImg.width*fs/2,-flmImg.height*fs/2,flmImg.width*fs,flmImg.height*fs);
+  
+  // 1. Move to the center of the screen (pivot point)
+  fX.translate(cx, cy);
+
+  // 2. APPLY FLIPS FIRST: This locks them to the screen axes
+  // scale(-1, 1) = Horizontal Flip; scale(1, -1) = Vertical Flip
+  fX.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+
+  // 3. Apply the user's manual translation (drag)
+  fX.translate(tx, ty);
+
+  // 4. Apply the rotation and scaling
+  const r = getTotalRot() * Math.PI / 180;
+  const s = getTotalSc();
+  fX.rotate(r);
+  fX.scale(s, s);
+
+  // 5. Draw the image (offset by half its size to center it on the pivot)
+  const fs = Math.min(W / flmImg.width, H / flmImg.height) * 0.85;
+  fX.drawImage(flmImg, -flmImg.width * fs / 2, -flmImg.height * fs / 2, flmImg.width * fs, flmImg.height * fs);
+  
   fX.restore();
+
   const fId=fX.getImageData(0,0,W,H), fd=fId.data;
   for(let i=0;i<fd.length;i+=4){
     const g=Math.min(255,(0.299*fd[i]+0.587*fd[i+1]+0.114*fd[i+2])*flmBr);
