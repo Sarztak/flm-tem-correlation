@@ -1,0 +1,2 @@
+[napari.manifest]
+roi-detect = roi_detect:napari.yaml

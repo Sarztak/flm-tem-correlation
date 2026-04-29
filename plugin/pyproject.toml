@@ -1,0 +1,28 @@
+[project]
+name = "roi-detect"
+version = "0.0.1"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "magicgui",
+    "qtpy",
+    "scikit-image",
+    "numpy",
+    "opencv-python",
+]
+
+[project.entry-points."napari.manifest"]
+roi-detect = "roi_detect:napari.yaml"
+
+[build-system]
+requires = ["setuptools>=77.0.3", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml"]
