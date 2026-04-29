@@ -228,7 +228,63 @@ def flm_roi_widget(
         crop_u8 = ((crop - crop.min()) / (crop.max() - crop.min()) * 255).astype(np.uint8)
         composite[y0:y1, x0:x1] = crop_u8
 
+    rectangles = []
+    properties = {'label': [], 'frame': [], 'laplacian': []}
+
+    for i, roi in enumerate(best_per_group):
+        x0, y0, x1, y1 = roi['bbox']
+        # napari shapes expects [[row0,col0],[row1,col1]] i.e. [[y0,x0],[y1,x1]]
+        rect = np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]])
+        rectangles.append(rect)
+        properties['label'].append(f"ROI {i} | frame {roi['frame_idx']}")
+        properties['frame'].append(roi['frame_idx'])
+        properties['laplacian'].append(roi['laplacian'])
+
     viewer.add_image(composite, name="best frame per roi")
+    shapes_layer = viewer.add_shapes(
+        rectangles,
+        shape_type='rectangle',
+        edge_color='white',
+        face_color='transparent',
+        edge_width=2,
+        properties=properties,
+        text={
+            'string': 'label',       # which property to show as text
+            'size': 14,
+            'color': 'red',
+            'anchor': 'upper_left',
+        },
+        name='Detected ROIs',
+    )
+
+    # add an empty points layer for user to annotate
+    points_layer = viewer.add_points(
+        ndim=2,
+        name='User Points',
+        size=15,
+        face_color='yellow',
+    )
+
+    # after user has added points, run this to find which ROI each point is in
+    def get_points_in_rois():
+        pts = points_layer.data  # shape (N, 2) as [row, col] i.e. [y, x]
+        results = []
+        for pt in pts:
+            py, px = pt[0], pt[1]
+            for i, roi in enumerate(best_per_group):
+                x0, y0, x1, y1 = roi['bbox']
+                if y0 <= py <= y1 and x0 <= px <= x1:
+                    results.append({'point': pt, 'roi_idx': i, 'roi': roi})
+                    break  # assume one ROI per point
+        return results
+        
+    @viewer.bind_key('Enter')
+    def on_done(viewer):
+        results = get_points_in_rois()
+        for r in results:
+            print(f"Point {r['point']} → ROI {r['roi_idx']} | frame {r['roi']['frame_idx']}")
+
+    points_layer.mode = 'add'
     viewer.reset_view()
 
     del flm_stack, img_tem
