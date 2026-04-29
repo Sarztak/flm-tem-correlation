@@ -1,0 +1,10 @@
+pyproject.toml
+src/roi_detect/__init__.py
+src/roi_detect/_widget_roi.py
+src/roi_detect/napari.yaml
+src/roi_detect.egg-info/PKG-INFO
+src/roi_detect.egg-info/SOURCES.txt
+src/roi_detect.egg-info/dependency_links.txt
+src/roi_detect.egg-info/entry_points.txt
+src/roi_detect.egg-info/requires.txt
+src/roi_detect.egg-info/top_level.txt
