@@ -6,6 +6,7 @@ from skimage import io
 from magicgui import magic_factory
 import napari
 from napari.utils.notifications import show_info
+import networkx as nx
 
 import cv2
 import matplotlib.pyplot as plt
@@ -17,6 +18,14 @@ from skimage import exposure, io, measure
 from skimage.filters import threshold_otsu
 
 DEFAULT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment\jey_002_g3_l3")
+
+def has_interior_peak(group_rois):
+    """Returns True if the Laplacian peaks at an interior frame, not at the edges."""
+    sorted_by_frame = sorted(group_rois, key=lambda r: r["frame_idx"])
+    values = [r["laplacian"] for r in sorted_by_frame]
+    peak_idx = np.argmax(values)
+    # peak must not be at the first or last frame
+    return 0 < peak_idx < len(values) - 1
 
 def merge_bboxes(bboxes, tem_height_flm: float, tem_width_flm: float) -> list:
     merge_dist = int(max(tem_height_flm, tem_width_flm))
@@ -83,31 +92,90 @@ def find_roi_with_origins(
 
     return crops, origins
 
-# Helper function to calculate focus on specific crops
-def find_best_frame_idx(flm_stack, img_tem, flm_px, tem_px):
-    focus_scores = {}
+def get_all_rois(flm_stack, img_tem, flm_pixel_nm, tem_pixel_nm, pad_factor=2):
+    # collect all ROIs across all frames with their bounding boxes and laplacian
+    all_rois = []  # list of {frame_idx, origin, bbox, laplacian}
+
     for frame_idx in range(flm_stack.shape[0]):
         flm_frame = flm_stack[frame_idx]
-        
-        # Logic requires finding ROIs first to avoid full-frame noise
-        crops, origins = find_roi_with_origins(flm_frame, img_tem, flm_px, tem_px, pad_factor=2)
-        
-        values = []
-        areas = []
-        for crop in crops:
+        crops, origins = find_roi_with_origins(flm_frame, img_tem, flm_pixel_nm, tem_pixel_nm, pad_factor=pad_factor)
+
+        for crop, (ox, oy) in zip(crops, origins):
             if crop.max() == crop.min():
                 continue
-            
+            h, w = crop.shape[:2]
             crop_u8 = ((crop - crop.min()) / (crop.max() - crop.min()) * 255).astype(np.uint8)
             lap = cv2.Laplacian(crop_u8, cv2.CV_64F).var()
-            
-            values.append(lap)
-            areas.append(crop.shape[0] * crop.shape[1])
+            mean_intensity = crop.mean()
+            all_rois.append({
+                "frame_idx": frame_idx,
+                "origin":    (ox, oy),
+                "bbox":      (ox, oy, ox + w, oy + h),  # (x0, y0, x1, y1)
+                "laplacian": lap,
+                "mean_intensity": mean_intensity,
+                "area":      w * h,
+            })
 
-        focus_scores[frame_idx] = np.average(values, weights=areas) if values else 0
+    del flm_stack, img_tem
+    gc.collect()
 
-    sharpest = max(focus_scores, key=focus_scores.get) 
-    return sharpest
+    return all_rois
+
+
+def iou(b1, b2):
+    ix0 = max(b1[0], b2[0])
+    iy0 = max(b1[1], b2[1])
+    ix1 = min(b1[2], b2[2])
+    iy1 = min(b1[3], b2[3])
+    if ix1 <= ix0 or iy1 <= iy0:
+        return 0.0
+    inter = (ix1 - ix0) * (iy1 - iy0)
+    a1    = (b1[2] - b1[0]) * (b1[3] - b1[1])
+    a2    = (b2[2] - b2[0]) * (b2[3] - b2[1])
+    return inter / (a1 + a2 - inter)
+
+def find_best_roi_frame_idx(all_rois, iou_threshold=0.3):
+    # group by spatial overlap using IoU
+    
+    groups = []  # list of lists of roi indices
+
+    G = nx.Graph()
+    G.add_nodes_from(range(len(all_rois)))
+
+    for i in range(len(all_rois)):
+        for j in range(i + 1, len(all_rois)):
+            if iou(all_rois[i]["bbox"], all_rois[j]["bbox"]) >= iou_threshold:
+                G.add_edge(i, j)
+
+    groups = list(nx.connected_components(G))
+
+    best_per_group = []
+    for group in groups:
+        best_idx = max(group, key=lambda i: all_rois[i]["laplacian"] * all_rois[i]["mean_intensity"])
+        best_roi = all_rois[best_idx]
+        best_per_group.append(best_roi)
+        print(
+            f"ROI group size={len(group):2d}  "
+            f"best frame={best_roi['frame_idx']:2d}  "
+            f"laplacian={best_roi['laplacian']:.2f}  "
+            f"mean_intensity={best_roi['mean_intensity']:.2f}  "
+            f"bbox={best_roi['bbox']}"
+        )
+
+    # filter groups: remove those images where the peak does not occur in the middle
+    valid_best_per_group = []
+    for group, best_roi in zip(groups, best_per_group):
+        group_rois = [all_rois[i] for i in group]
+        if has_interior_peak(group_rois):
+            valid_best_per_group.append(best_roi)
+            print(f"Valid ROI: best frame={best_roi['frame_idx']}  laplacian={best_roi['laplacian']:.2f}  bbox={best_roi['bbox']}")
+        else:
+            print(f"Rejected ROI (no interior peak): bbox={best_roi['bbox']}")
+
+    frames_to_process = sorted(set(r["frame_idx"] for r in valid_best_per_group))
+    print(f"\nFrames to process: {frames_to_process}")
+    return valid_best_per_group
+
 
 @magic_factory(
     call_button="Detect Best Frame & ROIs",
@@ -122,48 +190,46 @@ def find_best_frame_idx(flm_stack, img_tem, flm_px, tem_px):
         "value": DEFAULT_DIR / "JEY002_G3_L3_1950x_t-13.tif"
     },
     flm_pixel_nm={"label": "FLM px (nm)", "value": 121.0},
-    tem_pixel_nm={"label": "TEM px (nm)", "value": 6.9}
+    tem_pixel_nm={"label": "TEM px (nm)", "value": 6.9},
+    pad_factor={"label": "padding factor", "value": 1},
+    iou_threshold={"label": "IOU threshold", "value": 0.3},
 )
+
 def flm_roi_widget(
     viewer: "napari.viewer.Viewer",
     flm_path: Path,
     tem_path: Path,
     flm_pixel_nm: float,
-    tem_pixel_nm: float
+    tem_pixel_nm: float,
+    pad_factor: int,
+    iou_threshold: float,
 ):
     # 1. Load Data
     flm_stack = io.imread(str(flm_path))
     img_tem = io.imread(str(tem_path))
 
-    # 2. Find Sharpest Frame via Localized ROIs
-    best_idx = find_best_frame_idx(flm_stack, img_tem, flm_pixel_nm, tem_pixel_nm)
-    best_frame = flm_stack[best_idx]
-
-    # 3. Add to Viewer
-    viewer.layers.clear()
-    c_axis = 0 if best_frame.shape[0] == 3 else 2
-    
-    viewer.add_image(
-        best_frame, 
-        name=[f"Green (F:{best_idx})", f"Reflection (F:{best_idx})", f"Blue (F:{best_idx})"], 
-        channel_axis=c_axis,
-        colormap=["green", "gray", "blue"],
-        blending="additive"
+    all_rois = get_all_rois(
+        flm_stack, 
+        img_tem, 
+        flm_pixel_nm=flm_pixel_nm, 
+        tem_pixel_nm=tem_pixel_nm, 
+        pad_factor=pad_factor,
     )
 
-    viewer.add_image(
-        best_frame, 
-        name=[f"Green (F:{best_idx})", f"Reflection (F:{best_idx})", f"Blue (F:{best_idx})"], 
-        channel_axis=c_axis,
-        colormap=["green", "gray", "blue"],
-        blending="additive"
-    )
 
-    viewer.add_shapes(name="Detected ROIs", edge_color="white", face_color="transparent")
-    viewer.add_points(name="Target Selection", size=10, face_color="yellow")
+    best_per_group = find_best_roi_frame_idx(all_rois, iou_threshold=iou_threshold)
+    h, w = flm_stack.shape[1:3]
+    composite = np.full((h, w), 255, dtype=np.uint8)
 
+    for roi in best_per_group:
+        frame = flm_stack[roi["frame_idx"]]
+        x0, y0, x1, y1 = roi["bbox"]
+        crop = frame[y0:y1, x0:x1, 1] # only display reflection channel
+        crop_u8 = ((crop - crop.min()) / (crop.max() - crop.min()) * 255).astype(np.uint8)
+        composite[y0:y1, x0:x1] = crop_u8
+
+    viewer.add_image(composite, name="best frame per roi")
     viewer.reset_view()
-    show_info(f"Sharpest frame: {best_idx}")
 
     del flm_stack, img_tem
     gc.collect()
