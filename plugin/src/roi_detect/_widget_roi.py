@@ -64,7 +64,7 @@ def merge_bboxes(bboxes, tem_height_flm: float, tem_width_flm: float) -> list:
         if r0 <= pr1 and c0 <= pc1:
             merged[-1] = (min(pr0, r0), min(pc0, c0), max(pr1, r1), max(pc1, c1))
         else:
-            merged.append((r0, c0, r1, c1))
+            merged.append([r0, c0, r1, c1])
     return merged
 
 def find_roi_with_origins(
@@ -344,12 +344,11 @@ def flm_roi_widget(
                     # the bounding box is the key and group points in those bounding boxes
                     pts_per_region[roi_idx].append([px, py])
                     break # assuming that a point belongs to a single ROI
-        print(pts_per_region)
         return pts_per_region
 
     # tile the regions and select those that have the points in them
     def create_tiles():
-        filtered_bbox = []
+        filtered_bbox = defaultdict(list)
         pts_per_region = collect_user_data()
         for roi_idx, roi in enumerate(best_per_group):
             if roi_idx in pts_per_region:
@@ -375,7 +374,7 @@ def flm_roi_widget(
                     t_y1 += origin_y
                     for [px, py] in pts_per_region[roi_idx]:
                         if t_x0 < px < t_x1 and t_y0 < py < t_y1:
-                            filtered_bbox.append([t_x0, t_y0, t_x1, t_y1])
+                            filtered_bbox[roi_idx].append([t_x0, t_y0, t_x1, t_y1])
                             break # just find a box per point because if other points are there then same box will be selected so no need to check
         return filtered_bbox 
 
@@ -395,10 +394,17 @@ def flm_roi_widget(
     @viewer.bind_key('Enter')
     def on_done(viewer):
         results = get_points_in_rois()
-        filtered_bbox = create_tiles()
-        rectangles = [
-            np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]]) for x0, y0, x1, y1 in filtered_bbox
-        ]
+        filtered_bbox = create_tiles() # dictionary of filtered tiles per roi_idx
+        merged_bboxes = {}
+        for roi_idx, bboxes in filtered_bbox.items():
+            tem_height_flm = (tem_h * tem_pixel_nm) / flm_pixel_nm
+            tem_width_flm  = (tem_w * tem_pixel_nm) / flm_pixel_nm
+            merged_bboxes[roi_idx] = merge_bboxes(bboxes, tem_height_flm, tem_width_flm)
+
+        rectangles = []
+        for bboxes in merged_bboxes.values():
+            for x0, y0, x1, y1 in bboxes:
+                rectangles.append(np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]]))
 
         tiles_bbox_shapes_layer = viewer.add_shapes(
             rectangles,
