@@ -23,7 +23,7 @@ def get_tile_flm_bbox(flm_height: int, flm_width: int,
                       tem_height: int, tem_width: int,
                       flm_pixel_nm: float = 121.0, 
                       tem_pixel_nm: float = 6.9, 
-                      tile_scale: int = 2) -> list[list[int]]:
+                      tile_scale: float = 1.0) -> list[list[int]]:
     """Given dimensions of two images, it splits the FLM region into overlapping tiles."""
     
     tile_h = int((tem_height * tem_pixel_nm) / flm_pixel_nm * tile_scale)
@@ -200,6 +200,28 @@ def find_best_roi_frame_idx(all_rois, iou_threshold=0.3):
     print(f"\nFrames to process: {frames_to_process}")
     return valid_best_per_group
 
+def norm(img):
+        diff = img.max() - img.min()
+        if diff == 0: return np.zeros_like(img, dtype=np.uint8)
+        return ((img - img.min()) / diff * 255).astype(np.uint8)
+
+def render_flm_frame(flm_frame):
+    h, w = flm_frame.shape[:2] # h, w, c
+    composite = np.full((h, w, 3), 0, dtype=np.uint8)
+
+    refl = flm_frame[:, :, 1]
+    green = flm_frame[:, :, 0]
+    blue = flm_frame[:, :, 2]
+
+    refl_u8 = norm(refl)
+    blue_u8 = norm(blue)
+    green_u8 = norm(green)
+
+    composite[:, :, 2] = np.clip(refl_u8.astype(int) + blue_u8, 0, 255)  # Blue channel
+    composite[:, :, 1] = np.clip(refl_u8.astype(int) + green_u8, 0, 255) # Green channel
+    composite[:, :, 0] = refl_u8
+
+    return composite
 
 @magic_factory(
     call_button="Detect Best Frame & ROIs",
@@ -217,7 +239,7 @@ def find_best_roi_frame_idx(all_rois, iou_threshold=0.3):
     tem_pixel_nm={"label": "TEM px (nm)", "value": 6.9},
     pad_factor={"label": "padding factor", "value": 1},
     iou_threshold={"label": "IOU threshold", "value": 0.3},
-    tile_scale={"label": "FLM Tile Padding", "value": 2},
+    tile_scale={"label": "FLM Tile Padding", "value": 1},
 )
 
 def flm_roi_widget(
@@ -228,7 +250,7 @@ def flm_roi_widget(
     tem_pixel_nm: float,
     pad_factor: int,
     iou_threshold: float,
-    tile_scale: int,
+    tile_scale: float,
 ):
     # 1. Load Data
     flm_stack = io.imread(str(flm_path))
@@ -245,7 +267,7 @@ def flm_roi_widget(
 
     best_per_group = find_best_roi_frame_idx(all_rois, iou_threshold=iou_threshold)
     h, w = flm_stack.shape[1:3]
-    composite = np.full((h, w), 255, dtype=np.uint8)
+    composite = np.full((h, w, 3), 0, dtype=np.uint8)
 
     rectangles = []
     properties = {'label': [], 'frame': [], 'laplacian': []}
@@ -253,9 +275,21 @@ def flm_roi_widget(
     for i, roi in enumerate(best_per_group):
         frame = flm_stack[roi["frame_idx"]]
         x0, y0, x1, y1 = roi["bbox"]
-        crop = frame[y0:y1, x0:x1, 1] # only display reflection channel
-        crop_u8 = ((crop - crop.min()) / (crop.max() - crop.min()) * 255).astype(np.uint8)
-        composite[y0:y1, x0:x1] = crop_u8
+        crop = frame[y0:y1, x0:x1, :] # only display reflection channel
+
+        refl = crop[:, :, 1]
+        green = crop[:, :, 0]
+        blue = crop[:, :, 2]
+        
+        refl_u8 = norm(refl)
+        blue_u8 = norm(blue)
+        green_u8 = norm(green)
+
+        composite[y0:y1, x0:x1, 2] = np.clip(refl_u8.astype(int) + blue_u8, 0, 255)  # Blue channel
+        composite[y0:y1, x0:x1, 1] = np.clip(refl_u8.astype(int) + green_u8, 0, 255) # Green channel
+        composite[y0:y1, x0:x1, 0] = refl_u8
+        # crop_u8 = ((crop - crop.min()) / (crop.max() - crop.min()) * 255).astype(np.uint8)
+        # composite[y0:y1, x0:x1, :] = crop_u8
 
         # napari shapes expects [[row0,col0],[row1,col1]] i.e. [[y0,x0],[y1,x1]]
         rect = np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]])
@@ -264,7 +298,12 @@ def flm_roi_widget(
         properties['frame'].append(roi['frame_idx'])
         properties['laplacian'].append(roi['laplacian'])
 
+    # select the middle image of the flm_stack to serve as background image 
+    napari_compatible_flm_img = render_flm_frame(flm_stack[len(flm_stack)//2])
+    viewer.add_image(napari_compatible_flm_img, name='flm stack')
+
     viewer.add_image(composite, name="best frame per roi")
+
     shapes_layer = viewer.add_shapes(
         rectangles,
         shape_type='rectangle',
