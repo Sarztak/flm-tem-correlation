@@ -7,7 +7,7 @@ from magicgui import magic_factory
 import napari
 from napari.utils.notifications import show_info
 import networkx as nx
-
+from collections import defaultdict
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,6 +19,30 @@ from skimage.filters import threshold_otsu
 
 DEFAULT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment\jey_002_g3_l3")
 
+def get_tile_flm_bbox(flm_height: int, flm_width: int, 
+                      tem_height: int, tem_width: int,
+                      flm_pixel_nm: float = 121.0, 
+                      tem_pixel_nm: float = 6.9, 
+                      tile_scale: int = 2) -> list[list[int]]:
+    """Given dimensions of two images, it splits the FLM region into overlapping tiles."""
+    
+    tile_h = int((tem_height * tem_pixel_nm) / flm_pixel_nm * tile_scale)
+    tile_w = int((tem_width * tem_pixel_nm) / flm_pixel_nm * tile_scale)
+    step_y, step_x = tile_h // 2, tile_w // 2
+
+    tiles = []
+    for y in range(0, flm_height, step_y):
+        for x in range(0, flm_width, step_x):
+            if y + tile_h > flm_height or x + tile_w > flm_width:
+                continue
+            
+            # Append the bounding box as a list of coordinates
+            tiles.append([x, y, x + tile_w, y + tile_h])
+    
+    if not tiles:  # in case no tile is found
+        tiles.append([0, 0, tile_w, tile_h])
+    
+    return tiles
 def has_interior_peak(group_rois):
     """Returns True if the Laplacian peaks at an interior frame, not at the edges."""
     sorted_by_frame = sorted(group_rois, key=lambda r: r["frame_idx"])
@@ -45,7 +69,8 @@ def merge_bboxes(bboxes, tem_height_flm: float, tem_width_flm: float) -> list:
 
 def find_roi_with_origins(
     img_flm: np.ndarray,
-    img_tem: np.ndarray,
+    tem_h: int,
+    tem_w: int,
     flm_pixel_nm: float = 121.0,
     tem_pixel_nm: float = 6.9,
     pad_factor: int = 2,
@@ -59,7 +84,6 @@ def find_roi_with_origins(
     crops   : list of 2-D grayscale uint8 crops (reflection channel)
     origins : list of (col_start, row_start) tuples in full-image pixel coords
     """
-    tem_h, tem_w = img_tem.shape[:2]
     tem_height_flm = (tem_h * tem_pixel_nm) / flm_pixel_nm
     tem_width_flm  = (tem_w * tem_pixel_nm) / flm_pixel_nm
 
@@ -92,13 +116,13 @@ def find_roi_with_origins(
 
     return crops, origins
 
-def get_all_rois(flm_stack, img_tem, flm_pixel_nm, tem_pixel_nm, pad_factor=2):
+def get_all_rois(flm_stack, tem_h, tem_w, flm_pixel_nm, tem_pixel_nm, pad_factor=2):
     # collect all ROIs across all frames with their bounding boxes and laplacian
     all_rois = []  # list of {frame_idx, origin, bbox, laplacian}
 
     for frame_idx in range(flm_stack.shape[0]):
         flm_frame = flm_stack[frame_idx]
-        crops, origins = find_roi_with_origins(flm_frame, img_tem, flm_pixel_nm, tem_pixel_nm, pad_factor=pad_factor)
+        crops, origins = find_roi_with_origins(flm_frame, tem_h, tem_w, flm_pixel_nm, tem_pixel_nm, pad_factor=pad_factor)
 
         for crop, (ox, oy) in zip(crops, origins):
             if crop.max() == crop.min():
@@ -116,7 +140,7 @@ def get_all_rois(flm_stack, img_tem, flm_pixel_nm, tem_pixel_nm, pad_factor=2):
                 "area":      w * h,
             })
 
-    del flm_stack, img_tem
+    del flm_stack
     gc.collect()
 
     return all_rois
@@ -193,6 +217,7 @@ def find_best_roi_frame_idx(all_rois, iou_threshold=0.3):
     tem_pixel_nm={"label": "TEM px (nm)", "value": 6.9},
     pad_factor={"label": "padding factor", "value": 1},
     iou_threshold={"label": "IOU threshold", "value": 0.3},
+    tile_scale={"label": "FLM Tile Padding", "value": 2},
 )
 
 def flm_roi_widget(
@@ -203,14 +228,15 @@ def flm_roi_widget(
     tem_pixel_nm: float,
     pad_factor: int,
     iou_threshold: float,
+    tile_scale: int,
 ):
     # 1. Load Data
     flm_stack = io.imread(str(flm_path))
     img_tem = io.imread(str(tem_path))
-
+    tem_h, tem_w = img_tem.shape[:2]
     all_rois = get_all_rois(
         flm_stack, 
-        img_tem, 
+        tem_h, tem_w,
         flm_pixel_nm=flm_pixel_nm, 
         tem_pixel_nm=tem_pixel_nm, 
         pad_factor=pad_factor,
@@ -221,18 +247,16 @@ def flm_roi_widget(
     h, w = flm_stack.shape[1:3]
     composite = np.full((h, w), 255, dtype=np.uint8)
 
-    for roi in best_per_group:
+    rectangles = []
+    properties = {'label': [], 'frame': [], 'laplacian': []}
+
+    for i, roi in enumerate(best_per_group):
         frame = flm_stack[roi["frame_idx"]]
         x0, y0, x1, y1 = roi["bbox"]
         crop = frame[y0:y1, x0:x1, 1] # only display reflection channel
         crop_u8 = ((crop - crop.min()) / (crop.max() - crop.min()) * 255).astype(np.uint8)
         composite[y0:y1, x0:x1] = crop_u8
 
-    rectangles = []
-    properties = {'label': [], 'frame': [], 'laplacian': []}
-
-    for i, roi in enumerate(best_per_group):
-        x0, y0, x1, y1 = roi['bbox']
         # napari shapes expects [[row0,col0],[row1,col1]] i.e. [[y0,x0],[y1,x1]]
         rect = np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]])
         rectangles.append(rect)
@@ -265,7 +289,58 @@ def flm_roi_widget(
         face_color='yellow',
     )
 
+
     # after user has added points, run this to find which ROI each point is in
+    def collect_user_data():
+        pts = points_layer.data
+        pts_per_region = defaultdict(list)
+    
+        for pt in pts:
+            py, px = pt[0], pt[1]
+            for roi_idx, roi in enumerate(best_per_group):
+                x0, y0, x1, y1 = roi['bbox']
+                print(roi['bbox'], px, py)
+
+                if y0 <= py <= y1 and x0 <= px <= x1:
+                    # the bounding box is the key and group points in those bounding boxes
+                    pts_per_region[roi_idx].append([px, py])
+                    break # assuming that a point belongs to a single ROI
+        print(pts_per_region)
+        return pts_per_region
+
+    # tile the regions and select those that have the points in them
+    def create_tiles():
+        filtered_bbox = []
+        pts_per_region = collect_user_data()
+        for roi_idx, roi in enumerate(best_per_group):
+            if roi_idx in pts_per_region:
+                # select only the reflection channel to tile
+                x0, y0, x1, y1 = roi['bbox']
+                origin_x, origin_y = roi['origin']
+                flm_w = x1 - x0
+                flm_h = y1 - y0
+                tiles_bbox = get_tile_flm_bbox(
+                    flm_height=flm_h, flm_width=flm_w, 
+                    tem_height=tem_h, tem_width=tem_w,
+                    flm_pixel_nm=flm_pixel_nm, tem_pixel_nm=tem_pixel_nm,
+                    tile_scale=tile_scale
+                )
+
+                # now filter the bounding boxes that have the user selected points            
+                # I want to optimize this later on
+                for t_x0, t_y0, t_x1, t_y1 in tiles_bbox:
+                    # bbox are in the reference frame of the ROI, so they need to be made into absolute coordinates
+                    t_x0 += origin_x
+                    t_x1 += origin_x
+                    t_y0 += origin_y
+                    t_y1 += origin_y
+                    for [px, py] in pts_per_region[roi_idx]:
+                        if t_x0 < px < t_x1 and t_y0 < py < t_y1:
+                            filtered_bbox.append([t_x0, t_y0, t_x1, t_y1])
+                            break # just find a box per point because if other points are there then same box will be selected so no need to check
+        return filtered_bbox 
+
+
     def get_points_in_rois():
         pts = points_layer.data  # shape (N, 2) as [row, col] i.e. [y, x]
         results = []
@@ -275,14 +350,30 @@ def flm_roi_widget(
                 x0, y0, x1, y1 = roi['bbox']
                 if y0 <= py <= y1 and x0 <= px <= x1:
                     results.append({'point': pt, 'roi_idx': i, 'roi': roi})
-                    break  # assume one ROI per point
+                    # break  # assume one ROI per point
         return results
         
     @viewer.bind_key('Enter')
     def on_done(viewer):
         results = get_points_in_rois()
+        filtered_bbox = create_tiles()
+        rectangles = [
+            np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]]) for x0, y0, x1, y1 in filtered_bbox
+        ]
+
+        tiles_bbox_shapes_layer = viewer.add_shapes(
+            rectangles,
+            shape_type='rectangle',
+            edge_color='red',
+            face_color='transparent',
+            edge_width=2,
+        )
+
         for r in results:
             print(f"Point {r['point']} → ROI {r['roi_idx']} | frame {r['roi']['frame_idx']}")
+
+        for r in filtered_bbox:
+            print(f"Bbox co-ordinates:{r}")
 
     points_layer.mode = 'add'
     viewer.reset_view()
