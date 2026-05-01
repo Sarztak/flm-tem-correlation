@@ -18,6 +18,7 @@ from skimage import exposure, io, measure
 from skimage.filters import threshold_otsu
 
 DEFAULT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment\jey_002_g3_l3")
+OUTPUT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment\output")
 
 def get_tile_flm_bbox(flm_height: int, flm_width: int, 
                       tem_height: int, tem_width: int,
@@ -201,9 +202,9 @@ def find_best_roi_frame_idx(all_rois, iou_threshold=0.3):
     return valid_best_per_group
 
 def norm(img):
-        diff = img.max() - img.min()
-        if diff == 0: return np.zeros_like(img, dtype=np.uint8)
-        return ((img - img.min()) / diff * 255).astype(np.uint8)
+    diff = img.max() - img.min()
+    if diff == 0: return np.zeros_like(img, dtype=np.uint8)
+    return ((img - img.min()) / diff * 255).astype(np.uint8)
 
 def render_flm_frame(flm_frame):
     h, w = flm_frame.shape[:2] # h, w, c
@@ -239,7 +240,7 @@ def render_flm_frame(flm_frame):
     tem_pixel_nm={"label": "TEM px (nm)", "value": 6.9},
     pad_factor={"label": "padding factor", "value": 1},
     iou_threshold={"label": "IOU threshold", "value": 0.3},
-    tile_scale={"label": "FLM Tile Padding", "value": 1},
+    tile_scale={"label": "FLM Tile Padding", "value": 2},
 )
 
 def flm_roi_widget(
@@ -338,7 +339,6 @@ def flm_roi_widget(
             py, px = pt[0], pt[1]
             for roi_idx, roi in enumerate(best_per_group):
                 x0, y0, x1, y1 = roi['bbox']
-                print(roi['bbox'], px, py)
 
                 if y0 <= py <= y1 and x0 <= px <= x1:
                     # the bounding box is the key and group points in those bounding boxes
@@ -395,16 +395,26 @@ def flm_roi_widget(
     def on_done(viewer):
         results = get_points_in_rois()
         filtered_bbox = create_tiles() # dictionary of filtered tiles per roi_idx
-        merged_bboxes = {}
-        for roi_idx, bboxes in filtered_bbox.items():
-            tem_height_flm = (tem_h * tem_pixel_nm) / flm_pixel_nm
-            tem_width_flm  = (tem_w * tem_pixel_nm) / flm_pixel_nm
-            merged_bboxes[roi_idx] = merge_bboxes(bboxes, tem_height_flm, tem_width_flm)
 
         rectangles = []
-        for bboxes in merged_bboxes.values():
-            for x0, y0, x1, y1 in bboxes:
-                rectangles.append(np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]]))
+        save_dir = OUTPUT_DIR / f'filtered_bbox'
+        save_dir.mkdir(exist_ok=True)
+        crop_idx = 0
+        for roi_idx, roi in enumerate(best_per_group):
+            if roi_idx in filtered_bbox:
+                bboxes = filtered_bbox[roi_idx]
+                flm_frame = flm_stack[roi['frame_idx'], :, :, 1] # use refl channel
+                flm_frame_uint8 = norm(flm_frame)
+                flm_img_hist_eq = exposure.equalize_hist(flm_frame_uint8)
+                flm_img_hist_eq = (flm_img_hist_eq * 255).astype(np.uint8)
+
+                for (x0, y0, x1, y1) in bboxes:
+                    # crop the regions from the refl channel and store them in output folder
+                    crop = flm_img_hist_eq[y0:y1, x0:x1]
+                    crop = np.stack([crop] * 3, axis=-1)
+                    cv2.imwrite(save_dir / f'{crop_idx}.png', crop)
+                    crop_idx += 1
+                    rectangles.append(np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]]))
 
         tiles_bbox_shapes_layer = viewer.add_shapes(
             rectangles,
@@ -417,11 +427,9 @@ def flm_roi_widget(
         for r in results:
             print(f"Point {r['point']} → ROI {r['roi_idx']} | frame {r['roi']['frame_idx']}")
 
-        for r in filtered_bbox:
-            print(f"Bbox co-ordinates:{r}")
 
     points_layer.mode = 'add'
     viewer.reset_view()
 
-    del flm_stack, img_tem
+    # del flm_stack, img_tem
     gc.collect()
