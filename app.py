@@ -174,34 +174,30 @@ def estimate_transform(kpts0, kpts1):
     return M, inliers, scale
 
 def apply_transform_overlay(img_source, img_target, M, alpha=0.5):
-    """Warp source image and overlay on target with red/blue coloring"""
     h, w = img_target.shape[:2]
-
-    # Warp source to match target
     warped = cv2.warpAffine(img_source, M, (w, h), flags=cv2.INTER_LINEAR)
 
-    # Convert grayscale to RGB with different colors
-    # Target = Red channel
-    # Warped = Blue channel
-    overlay = np.zeros((h, w, 3), dtype=np.uint8)
-
-    # Normalize if needed
+    # normalize both to uint8
     if img_target.max() > 0:
         target_norm = (img_target.astype(float) / img_target.max() * 255).astype(np.uint8)
     else:
-        target_norm = img_target
+        target_norm = img_target.astype(np.uint8)
 
     if warped.max() > 0:
         warped_norm = (warped.astype(float) / warped.max() * 255).astype(np.uint8)
     else:
-        warped_norm = warped
+        warped_norm = warped.astype(np.uint8)
 
-    overlay[:, :, 0] = warped_norm  # Blue channel = warped source
-    overlay[:, :, 2] = target_norm  # Red channel = target
+    # overlay: target as gray, warped source as green
+    overlay = np.zeros((h, w, 3), dtype=np.uint8)
+    overlay[:, :, 0] = target_norm   # R = target gray
+    overlay[:, :, 1] = np.maximum(target_norm, warped_norm)  # G = both (gray + green)
+    overlay[:, :, 2] = target_norm   # B = target gray
 
-    # Where they overlap = purple/magenta
+    # add warped source purely into green channel
+    overlay[:, :, 1] = np.clip(overlay[:, :, 1].astype(int) + warped_norm.astype(int), 0, 255).astype(np.uint8)
 
-    return overlay, warped
+    return overlay, warped, target_norm, warped_norm
 
 # Update the Match tab
 with t3:
@@ -268,21 +264,21 @@ with t3:
 
             # Apply transform and create overlay
             alpha_blend = st.slider("Overlay transparency", 0.0, 1.0, 0.5, 0.05)
-            overlay, warped = apply_transform_overlay(img1, img2, M, alpha=alpha_blend)
+            overlay, warped, target_norm, warped_norm = apply_transform_overlay(img1, img2, M)
 
-            # Display results
+                # Display results
             fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
-            axes[0].imshow(img2)
+            axes[0].imshow(img2, cmap='gray')
             axes[0].set_title("Target (Image 2)")
             axes[0].axis('off')
 
-            axes[1].imshow(warped)
+            axes[1].imshow(warped, cmap='gray')
             axes[1].set_title(f"Warped Source (scale={scale:.4f})")
             axes[1].axis('off')
 
             axes[2].imshow(overlay)
-            axes[2].set_title("Overlay (Red=Target, Blue=Source)")
+            axes[2].set_title("Overlay (Gray=Target, Green=Source)")
             axes[2].axis('off')
 
             plt.tight_layout()
