@@ -1,4 +1,5 @@
 import json
+import torch
 import numpy as np
 import cv2
 import gc
@@ -27,7 +28,7 @@ OUTPUT_DIR = ROOT_DIR / "output"
 # add the root_dir to the path to load models 
 sys.path.append(str(ROOT_DIR))
 
-from model_setup import upscale_and_save
+from model_setup import upscale_and_save, load_sam2_model
 ff_bb_save_dir = OUTPUT_DIR / f'filtered_bbox'
 upscaled_ff_bb_save_dir = OUTPUT_DIR / f'upscaled_filtered_bbox'
 handoff_dir = OUTPUT_DIR / "handoff"
@@ -35,6 +36,8 @@ handoff_dir = OUTPUT_DIR / "handoff"
 ff_bb_save_dir.mkdir(exist_ok=True)
 upscaled_ff_bb_save_dir.mkdir(exist_ok=True)
 handoff_dir.mkdir(exist_ok=True)
+
+_, predictor = load_sam2_model()
 
 def get_tile_flm_bbox(flm_height: int, flm_width: int, 
                       tem_height: int, tem_width: int,
@@ -552,7 +555,13 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
 
         # add selected image and show it
         selected_img = images[idx]
-        selected_flm_layer = viewer.add_image(images[idx], name="FLM Crop Selected for Segmentation")
+        selected_img = (selected_img > 130).astype(np.uint8) * 255
+
+        # in case selected image is not RGB, SAM needs it 
+        if len(selected_img.shape) == 2:
+            selected_img = np.stack([selected_img] * 3)
+            
+        selected_flm_layer = viewer.add_image(selected_img, name="FLM Crop Selected for Segmentation")
         selected_flm_layer.visible = True
 
         # add a fresh annotation layer for annotation on the selected img
@@ -574,6 +583,24 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
             print(f"Annotation points: {annotation_pts}")
             show_info(f"{len(annotation_pts)} points confirmed for further processing.")
 
+            predictor.set_image(selected_img)
+
+            coords = np.array([
+                [int(pt[1]), int(pt[0])] # the metadata is stored in (y, x) but SAM needs data in (x, y)
+                for pt in annotation_layer.metadata["points"]
+            ])
+
+            labs = np.array([1] * len(annotation_layer.metadata["points"]))
+
+            with torch.inference_mode():
+                masks, scores, _ = predictor.predict(
+                    point_coords=coords,
+                    point_labels=labs,
+                    multimask_output=True
+                )
+            
+            best_mask = masks[np.argmax(scores)]
+            viewer.add_image(best_mask.astype(np.uint8) * 255, name="FLM Mask")
 
 def match_widget():
     ...
