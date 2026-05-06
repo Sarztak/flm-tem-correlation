@@ -21,6 +21,8 @@ from skimage import exposure, io, measure
 from skimage.filters import threshold_otsu
 import sys 
 
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
 ROOT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment")
 DEFAULT_DIR = ROOT_DIR / "jey_002_g3_l3"
 OUTPUT_DIR = ROOT_DIR / "output"
@@ -28,18 +30,19 @@ OUTPUT_DIR = ROOT_DIR / "output"
 # add the root_dir to the path to load models 
 sys.path.append(str(ROOT_DIR))
 
-from model_setup import upscale_and_save, load_sam2_model
-ff_bb_save_dir = OUTPUT_DIR / f'filtered_bbox'
-upscaled_ff_bb_save_dir = OUTPUT_DIR / f'upscaled_filtered_bbox'
+from model_setup import upscale_and_save, load_sam2_model, load_lightglue_models, create_tensor_from_mask, get_keypoint_matches
+ff_bb_save_dir = OUTPUT_DIR / 'filtered_bbox'
+upscaled_ff_bb_save_dir = OUTPUT_DIR / 'upscaled_filtered_bbox'
+segmentation_dir = OUTPUT_DIR / 'segmentation'
 handoff_dir = OUTPUT_DIR / "handoff"
 
 ff_bb_save_dir.mkdir(exist_ok=True)
 upscaled_ff_bb_save_dir.mkdir(exist_ok=True)
+segmentation_dir.mkdir(exist_ok=True)
 handoff_dir.mkdir(exist_ok=True)
-flm_segmentation_mask = None
-tem_segmentation_mask = None
 
 _, predictor = load_sam2_model()
+extractor, matcher = load_lightglue_models()
 
 def get_tile_flm_bbox(flm_height: int, flm_width: int, 
                       tem_height: int, tem_width: int,
@@ -602,8 +605,9 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
                 )
             
             flm_segmentation_mask = masks[np.argmax(scores)]
+            flm_segmentation_mask = flm_segmentation_mask.astype(np.uint8) * 255
             viewer.add_image(flm_segmentation_mask.astype(np.uint8) * 255, name="FLM Mask")
-
+            cv2.imwrite(segmentation_dir / 'flm_seg_mask.png', flm_segmentation_mask)
 
             tem_path = OUTPUT_DIR / "tem_inv_thresh.png"
 
@@ -643,6 +647,35 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
                         )
                     
                     tem_segmentation_mask = masks[np.argmax(scores)]
-                    viewer.add_image(tem_segmentation_mask.astype(np.uint8) * 255, name="TEM Mask")
-def match_widget():
-    ...
+                    tem_segmentation_mask = tem_segmentation_mask.astype(np.uint8) * 255
+                    viewer.add_image(tem_segmentation_mask, name="TEM Mask")
+                    cv2.imwrite(segmentation_dir / 'tem_seg_mask.png', tem_segmentation_mask)
+
+@magic_factory(
+        call_button="Match Keypoints",
+        thresh={"label": "Match Threshold", "value": 0.02}
+)
+def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
+    import io as _io
+    from PIL import Image as PILImage
+    from lightglue import viz2d
+    flm_segmentation_mask = cv2.imread(segmentation_dir / 'flm_seg_mask.png') / 255.0
+    tem_segmentation_mask = cv2.imread(segmentation_dir / 'tem_seg_mask.png') / 255.0
+    t0 = create_tensor_from_mask(flm_segmentation_mask, DEVICE)
+    t1t = create_tensor_from_mask(tem_segmentation_mask, DEVICE)
+
+    _, _, mk0, mk1, m01 = get_keypoint_matches(extractor, matcher, t0, t1t, thresh)
+
+    show_info(f"Found {len(mk0)} matches")
+    viz2d.plot_images([t0[0][0], t1t[0][0]])
+    viz2d.plot_matches(mk0, mk1, color="lime", lw=0.2)
+    fig = plt.gcf()
+
+    buf_io = _io.BytesIO()
+    fig.savefig(OUTPUT_DIR / 'matches.png')
+    # buf_io.seek(0)
+    # img_arr = np.array(PILImage.open(buf_io).convert('RGB'))
+    # plt.close(fig)
+
+    # viewer.add_image(img_arr, name=f"Keypoint Matches ({len(mk0)})", rgb=True)
+    # viewer.reset_view()
