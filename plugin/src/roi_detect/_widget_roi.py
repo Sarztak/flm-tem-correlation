@@ -253,6 +253,10 @@ def flm_roi_widget(
     iou_threshold: float,
     tile_scale: float,
 ):
+
+    # clean all the layers before loading anything
+    viewer.layers.clear()
+
     # 1. Load Data
     flm_stack = io.imread(str(flm_path))
     img_tem = io.imread(str(tem_path))
@@ -390,7 +394,9 @@ def flm_roi_widget(
                     results.append({'point': pt, 'roi_idx': i, 'roi': roi})
                     # break  # assume one ROI per point
         return results
-        
+
+    # when other images are loaded, it tried to bind the enter key again which causes error, therefore it needs to check before binding
+    viewer.bind_key('Enter', None, overwrite=True) 
     @viewer.bind_key('Enter')
     def on_done(viewer):
         results = get_points_in_rois()
