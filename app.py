@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw
 import matplotlib.pyplot as plt
 import torch
 from streamlit_image_coordinates import streamlit_image_coordinates
-from model_setup import load_lightglue_models, load_sam2_model
+from model_setup import load_lightglue_models, load_sam2_model, create_tensor_from_mask, get_keypoint_matches
 from lightglue.utils import rbd
 from lightglue import viz2d
 
@@ -13,6 +13,14 @@ st.title("SAM2 + LightGlue")
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DISPLAY_WIDTH = 640
+
+def draw_points(base_img, img_id):
+    img = base_img.convert("RGB")
+    draw = ImageDraw.Draw(img)
+    for (dx, dy), lbl in zip(st.session_state[f"points_{img_id}"], st.session_state[f"labels_{img_id}"]):
+        color = (0, 220, 0) if lbl == 1 else (220, 0, 0)
+        draw.ellipse([(dx-8, dy-8), (dx+8, dy+8)], fill=color, outline="white", width=2)
+    return img
 
 @st.cache_resource
 def load_all_tools():
@@ -25,38 +33,6 @@ extractor, matcher, predictor = load_all_tools()
 for i in ["1", "2"]:
     for key in ["points", "labels", "mask", "img_pil", "last_click"]:
         st.session_state.setdefault(f"{key}_{i}", [] if "points" in key or "labels" in key else None)
-
-def create_tensor_from_mask(mask):
-    # Mask is 2D bool/uint8, expand to 3-channel float tensor
-    if mask.ndim == 2:
-        mask = np.stack([mask, mask, mask], axis=-1)
-    # HWC -> CHW
-    image = np.transpose(mask, (2, 0, 1))
-    return torch.from_numpy(image).float().unsqueeze(0).to(DEVICE)
-
-def get_keypoint_matches(image0, image1, conf_thresh):
-    feats0 = extractor.extract(image0)
-    feats1 = extractor.extract(image1)
-
-    # Update threshold on existing matcher
-    matcher.conf.filter_threshold = conf_thresh
-
-    matches01 = matcher({
-        "image0": feats0,
-        "image1": feats1,
-    })
-
-    feats0, feats1, matches01 = [rbd(x) for x in [feats0, feats1, matches01]]
-    kpts0, kpts1, matches = feats0["keypoints"], feats1["keypoints"], matches01["matches"]
-    return kpts0, kpts1, kpts0[matches[..., 0]], kpts1[matches[..., 1]], matches01
-
-def draw_points(base_img, img_id):
-    img = base_img.convert("RGB")
-    draw = ImageDraw.Draw(img)
-    for (dx, dy), lbl in zip(st.session_state[f"points_{img_id}"], st.session_state[f"labels_{img_id}"]):
-        color = (0, 220, 0) if lbl == 1 else (220, 0, 0)
-        draw.ellipse([(dx-8, dy-8), (dx+8, dy+8)], fill=color, outline="white", width=2)
-    return img
 
 def run_sam_logic(img_id):
     if not st.session_state[f"points_{img_id}"]:
@@ -173,6 +149,7 @@ def estimate_transform(kpts0, kpts1):
 
     return M, inliers, scale
 
+
 def apply_transform_overlay(img_source, img_target, M, alpha=0.5):
     h, w = img_target.shape[:2]
     warped = cv2.warpAffine(img_source, M, (w, h), flags=cv2.INTER_LINEAR)
@@ -211,10 +188,10 @@ with t3:
             run_transform = st.button("Estimate Transform")
 
         if run_match:
-            t0 = create_tensor_from_mask(st.session_state.mask_1)
-            t1t = create_tensor_from_mask(st.session_state.mask_2)
+            t0 = create_tensor_from_mask(st.session_state.mask_1, DEVICE)
+            t1t = create_tensor_from_mask(st.session_state.mask_2, DEVICE)
 
-            _, _, mk0, mk1, m01 = get_keypoint_matches(t0, t1t, thresh)
+            _, _, mk0, mk1, m01 = get_keypoint_matches(extractor, matcher, t0, t1t, thresh)
 
             # Store matches in session state
             st.session_state['matched_kpts_1'] = mk0.cpu().numpy()

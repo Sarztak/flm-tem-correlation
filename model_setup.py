@@ -1,6 +1,7 @@
 import subprocess
 import sys
 from pathlib import Path
+from PIL import Image, ImageDraw
 import torch
 import cv2
 import matplotlib.pyplot as plt
@@ -157,34 +158,60 @@ def load_lightglue_models(filter_threshold: float = 0.05, depth_confidence=-1, w
     # LightGlue with local weights
     matcher = LightGlue(
         features="superpoint",
-        depth_confidence=-1,
-        width_confidence=-1,
+        depth_confidence=depth_confidence,
+        width_confidence=width_confidence,
         filter_threshold=filter_threshold,
     ).eval().to(device)
 
     print("SuperPoint + LightGlue loaded from local checkpoints")
     return extractor, matcher
 
+def upscale_and_save(input_dir: Path | str, output_dir: Path | str, window_size: int = 8, max_batch_size: int =4):
+    img_arr = []
+    input_dir = Path(input_dir)
+    for img_path in input_dir.glob("*.png"):
+        img = cv2.imread(img_path, 0) # open as gray scale
+        if len(img.shape) == 2:
+            img = np.stack([img] * 3, axis=-1) # need to create RGB since swinir needs to have 3 channel images
+        img_arr.append(img)
+    swinir_model = load_swinir_model()
+    upscaled = swinir_upscale(
+        swinir_model,
+        img_arr,
+        window_size=window_size,
+        max_batch_size=max_batch_size,
+    )
+    output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True)
+    for i, img in enumerate(upscaled):
+        cv2.imwrite(output_dir / f'{str(i).zfill(3)}.png', img)
+
+def create_tensor_from_mask(mask, device):
+    # Mask is 2D bool/uint8, expand to 3-channel float tensor
+    if mask.ndim == 2:
+        mask = np.stack([mask, mask, mask], axis=-1)
+    # HWC -> CHW
+    image = np.transpose(mask, (2, 0, 1))
+    return torch.from_numpy(image).float().unsqueeze(0).to(device)
+
+def get_keypoint_matches(extractor, matcher, image0, image1, conf_thresh):
+    from lightglue.utils import rbd
+    from lightglue import viz2d
+    feats0 = extractor.extract(image0)
+    feats1 = extractor.extract(image1)
+
+    # Update threshold on existing matcher
+    matcher.conf.filter_threshold = conf_thresh
+
+    matches01 = matcher({
+        "image0": feats0,
+        "image1": feats1,
+    })
+
+    feats0, feats1, matches01 = [rbd(x) for x in [feats0, feats1, matches01]]
+    kpts0, kpts1, matches = feats0["keypoints"], feats1["keypoints"], matches01["matches"]
+    return kpts0, kpts1, kpts0[matches[..., 0]], kpts1[matches[..., 1]], matches01
+
+
 if __name__ == "__main__":
-    ...
-    # load_lightglue_models()
-    # ff_bb_path = DEFAULT_DIR/ 'output' / 'filtered_bbox'
-    # img_arr = []
-    # for img_path in ff_bb_path.glob("*.png"):
-    #     img = cv2.imread(img_path, 0) # open as gray scale
-    #     if len(img.shape) == 2:
-    #         img = np.stack([img] * 3, axis=-1) # need to create RGB since swinir needs to have 3 channel images
-    #     img_arr.append(img)
-    # swinir_model = load_swinir_model()
-    # upscaled = swinir_upscale(
-    #     swinir_model,
-    #     img_arr,
-    #     window_size=8,
-    #     max_batch_size=4
-    # )
-
-    # ff_bb_upscaled = DEFAULT_DIR / 'output' / 'ff_bb_upscaled'
-    # ff_bb_upscaled.mkdir(exist_ok=True)
-
-    # for i, img in enumerate(upscaled):
-    #     cv2.imwrite(ff_bb_upscaled / f'{str(i).zfill(3)}.png', img)
+    upscale_and_save()
