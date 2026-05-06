@@ -1,9 +1,11 @@
+import json
 import numpy as np
 import cv2
 import gc
 from pathlib import Path
 from skimage import io
 from magicgui import magic_factory
+from magicgui.widgets import ComboBox, PushButton, Container
 import napari
 from napari.utils.notifications import show_info
 import networkx as nx
@@ -16,9 +18,23 @@ from scipy import ndimage
 from scipy.optimize import minimize
 from skimage import exposure, io, measure
 from skimage.filters import threshold_otsu
+import sys 
 
-DEFAULT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment\jey_002_g3_l3")
-OUTPUT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment\output")
+ROOT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment")
+DEFAULT_DIR = ROOT_DIR / "jey_002_g3_l3"
+OUTPUT_DIR = ROOT_DIR / "output"
+
+# add the root_dir to the path to load models 
+sys.path.append(str(ROOT_DIR))
+
+from model_setup import upscale_and_save
+ff_bb_save_dir = OUTPUT_DIR / f'filtered_bbox'
+upscaled_ff_bb_save_dir = OUTPUT_DIR / f'upscaled_filtered_bbox'
+handoff_dir = OUTPUT_DIR / "handoff"
+
+ff_bb_save_dir.mkdir(exist_ok=True)
+upscaled_ff_bb_save_dir.mkdir(exist_ok=True)
+handoff_dir.mkdir(exist_ok=True)
 
 def get_tile_flm_bbox(flm_height: int, flm_width: int, 
                       tem_height: int, tem_width: int,
@@ -224,6 +240,16 @@ def render_flm_frame(flm_frame):
 
     return composite
 
+def prepare_tem(tem_path, thresh=130):
+    from skimage import io
+    raw = io.imread(tem_path)
+    if raw.ndim == 3:
+        raw = raw[:, :, 0]
+    img_u8 = ((raw.astype(float) - raw.min()) / (raw.max() - raw.min() + 1e-8) * 255).astype(np.uint8)
+    inverted = 255 - img_u8
+    thresh_img = (inverted > thresh).astype(np.uint8) * 255
+    return img_u8, thresh_img  # img_u8 for final overlay, inverted for SAM
+
 @magic_factory(
     call_button="Detect Best Frame & ROIs",
     flm_path={
@@ -242,7 +268,6 @@ def render_flm_frame(flm_frame):
     iou_threshold={"label": "IOU threshold", "value": 0.3},
     tile_scale={"label": "FLM Tile Padding", "value": 2},
 )
-
 def flm_roi_widget(
     viewer: "napari.viewer.Viewer",
     flm_path: Path,
@@ -269,6 +294,11 @@ def flm_roi_widget(
         pad_factor=pad_factor,
     )
 
+
+    # prepare the tem_img for the next stage
+    img_uint8, inv_thresh_tem_img = prepare_tem(tem_path)
+    cv2.imwrite(OUTPUT_DIR / "tem.png", img_uint8)
+    cv2.imwrite(OUTPUT_DIR / "tem_inv_thresh.png", inv_thresh_tem_img)
 
     best_per_group = find_best_roi_frame_idx(all_rois, iou_threshold=iou_threshold)
     h, w = flm_stack.shape[1:3]
@@ -403,8 +433,6 @@ def flm_roi_widget(
         filtered_bbox = create_tiles() # dictionary of filtered tiles per roi_idx
 
         rectangles = []
-        save_dir = OUTPUT_DIR / f'filtered_bbox'
-        save_dir.mkdir(exist_ok=True)
         crop_idx = 0
         for roi_idx, roi in enumerate(best_per_group):
             if roi_idx in filtered_bbox:
@@ -418,10 +446,11 @@ def flm_roi_widget(
                     # crop the regions from the refl channel and store them in output folder
                     crop = flm_img_hist_eq[y0:y1, x0:x1]
                     crop = np.stack([crop] * 3, axis=-1)
-                    cv2.imwrite(save_dir / f'{crop_idx}.png', crop)
+                    cv2.imwrite(ff_bb_save_dir / f'{crop_idx}.png', crop)
                     crop_idx += 1
                     rectangles.append(np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]]))
 
+        upscale_and_save(ff_bb_save_dir, upscaled_ff_bb_save_dir)
         tiles_bbox_shapes_layer = viewer.add_shapes(
             rectangles,
             shape_type='rectangle',
@@ -430,6 +459,7 @@ def flm_roi_widget(
             edge_width=2,
         )
 
+
         for r in results:
             print(f"Point {r['point']} → ROI {r['roi_idx']} | frame {r['roi']['frame_idx']}")
 
@@ -437,5 +467,113 @@ def flm_roi_widget(
     points_layer.mode = 'add'
     viewer.reset_view()
 
+
     # del flm_stack, img_tem
     gc.collect()
+
+@magic_factory(call_button="Load Segmentation Images")
+def segment_widget(viewer: "napari.viewer.Viewer"):
+    img_paths = sorted(upscaled_ff_bb_save_dir.glob("*.png"))
+    if not img_paths:
+        show_info("No images found.")
+        return
+
+    images = [io.imread(str(p)) for p in img_paths]
+    
+    PADDING = 20
+    COLS = 3
+    rows = int(np.ceil(len(images) / COLS))
+    h, w = images[0].shape[:2]
+    c = images[0].shape[2] if images[0].ndim == 3 else 1
+
+    canvas_h = rows * h + (rows + 1) * PADDING
+    canvas_w = COLS * w + (COLS + 1) * PADDING
+    canvas = np.zeros((canvas_h, canvas_w, c), dtype=np.uint8)
+
+    for idx, img in enumerate(images):
+        row = idx // COLS
+        col = idx % COLS
+        y0 = PADDING + row * (h + PADDING)
+        x0 = PADDING + col * (w + PADDING)
+        canvas[y0:y0+h, x0:x0+w] = img if img.ndim == 3 else img[:, :, np.newaxis]
+
+    viewer.layers.clear()
+    viewer.add_image(canvas, name="Segmentation Grid")
+
+    tem_path = OUTPUT_DIR / "tem_inv_thresh.png"
+    print(tem_path.exists())
+    if tem_path.exists():
+        tem_inv_thresh_img = cv2.imread(tem_path)
+        # viewer.add_image(tem_inv_thresh_img, name="TEM Segmentation Image")
+
+    points_layer = viewer.add_points(ndim=2, name="Selection", size=20, face_color="green")
+
+    points_layer.mode = 'add'
+
+    viewer.reset_view()
+
+    viewer.bind_key('Enter', None, overwrite=True) 
+    @viewer.bind_key('Enter')
+    def on_point_added(event):
+        pts = points_layer.data
+        if len(pts) == 0:
+            return
+
+        # keep only the latest point
+        latest = pts[-1]
+        points_layer.data = pts[-1:]
+
+        py, px = latest[0], latest[1]
+        col = int((px - PADDING) // (w + PADDING))
+        row = int((py - PADDING) // (h + PADDING))
+
+        # check if click landed inside an actual image (not on padding)
+        x0 = PADDING + col * (w + PADDING)
+        y0 = PADDING + row * (h + PADDING)
+        if not (x0 <= px < x0 + w and y0 <= py < y0 + h):
+            show_info("Click inside an image, not on padding.")
+            points_layer.data = np.empty((0, 2))
+            return
+
+        idx = row * COLS + col
+        if idx >= len(img_paths):
+            show_info("No image at that position.")
+            points_layer.data = np.empty((0, 2))
+            return
+
+        # selected_path = img_paths[idx]
+        # show_info(f"selected: {selected_path.name}")
+        # print(f"selected image path: {selected_path}")
+        points_layer.metadata["selected_idx"] = idx
+
+        # hide all the existing layers
+        for layer in viewer.layers:
+            layer.visible = False 
+
+        # add selected image and show it
+        selected_img = images[idx]
+        selected_flm_layer = viewer.add_image(images[idx], name="FLM Crop Selected for Segmentation")
+        selected_flm_layer.visible = True
+
+        # add a fresh annotation layer for annotation on the selected img
+        annotation_layer = viewer.add_points(
+            ndim=2,
+            name="Segmentation Points",
+            size=15,
+            face_color="green",
+        )
+        annotation_layer.mode = 'add'
+        viewer.reset_view()
+        
+        # bind Enter to confirm annotation and store points
+        viewer.bind_key('Enter', None, overwrite=True)
+        @viewer.bind_key('Enter')
+        def on_annotation_done(viewer):
+            annotation_pts = annotation_layer.data 
+            annotation_layer.metadata["points"] = annotation_pts
+            print(f"Annotation points: {annotation_pts}")
+            show_info(f"{len(annotation_pts)} points confirmed for further processing.")
+
+
+def match_widget():
+    ...
