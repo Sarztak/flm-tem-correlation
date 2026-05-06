@@ -36,6 +36,8 @@ handoff_dir = OUTPUT_DIR / "handoff"
 ff_bb_save_dir.mkdir(exist_ok=True)
 upscaled_ff_bb_save_dir.mkdir(exist_ok=True)
 handoff_dir.mkdir(exist_ok=True)
+flm_segmentation_mask = None
+tem_segmentation_mask = None
 
 _, predictor = load_sam2_model()
 
@@ -599,8 +601,48 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
                     multimask_output=True
                 )
             
-            best_mask = masks[np.argmax(scores)]
-            viewer.add_image(best_mask.astype(np.uint8) * 255, name="FLM Mask")
+            flm_segmentation_mask = masks[np.argmax(scores)]
+            viewer.add_image(flm_segmentation_mask.astype(np.uint8) * 255, name="FLM Mask")
 
+
+            tem_path = OUTPUT_DIR / "tem_inv_thresh.png"
+
+            if tem_path.exists():
+                tem_inv_thresh_img = cv2.imread(tem_path)
+
+                # in case selected image is not RGB, SAM needs it 
+                if len(tem_inv_thresh_img.shape) == 2:
+                    tem_inv_thresh_img = np.stack([tem_inv_thresh_img] * 3)
+                viewer.add_image(tem_inv_thresh_img, name="tem segmentation image")
+                annotation_layer_tem = viewer.add_points(ndim=2, name="TEM Segmentation Points", size=15, face_color="red")
+                annotation_layer_tem.mode = 'add'
+                viewer.reset_view()
+
+                viewer.bind_key('Enter', None, overwrite=True)
+                @viewer.bind_key('Enter')
+                def on_tem_annotation_done(viewer):
+                    annotation_pts = annotation_layer_tem.data 
+                    annotation_layer_tem.metadata["points"] = annotation_pts
+                    print(f"Annotation points: {annotation_pts}")
+                    show_info(f"{len(annotation_pts)} points confirmed for further processing.")
+
+                    predictor.set_image(tem_inv_thresh_img)
+
+                    coords = np.array([
+                        [int(pt[1]), int(pt[0])] # the metadata is stored in (y, x) but SAM needs data in (x, y)
+                        for pt in annotation_layer_tem.metadata["points"]
+                    ])
+
+                    labs = np.array([1] * len(annotation_layer_tem.metadata["points"]))
+
+                    with torch.inference_mode():
+                        masks, scores, _ = predictor.predict(
+                            point_coords=coords,
+                            point_labels=labs,
+                            multimask_output=True
+                        )
+                    
+                    tem_segmentation_mask = masks[np.argmax(scores)]
+                    viewer.add_image(tem_segmentation_mask.astype(np.uint8) * 255, name="TEM Mask")
 def match_widget():
     ...
