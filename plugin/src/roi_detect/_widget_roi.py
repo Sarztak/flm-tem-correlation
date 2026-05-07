@@ -19,6 +19,7 @@ from scipy import ndimage
 from scipy.optimize import minimize
 from skimage import exposure, io, measure
 from skimage.filters import threshold_otsu
+from qtpy.QtWidgets import QLabel, QWidget, QVBoxLayout
 import sys 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -46,12 +47,27 @@ _, predictor = load_sam2_model()
 extractor, matcher = load_lightglue_models()
 state = dict(flm_idx_img_path=[], bboxes=[], selected_bbox_idx=[])
 
+def show_transform_result(viewer, M, scale):
+    widget = QWidget()
+    layout = QVBoxLayout()
+    
+    text = (
+        f"<b>Scale:</b> {scale:.4f}<br><br>"
+        f"<b>Transform Matrix:</b><br>"
+        f"{M[0,0]:.4f}  {M[0,1]:.4f}  {M[0,2]:.4f}<br>"
+        f"{M[1,0]:.4f}  {M[1,1]:.4f}  {M[1,2]:.4f}"
+    )
+    label = QLabel(text)
+    layout.addWidget(label)
+    widget.setLayout(layout)
+    
+    viewer.window.add_dock_widget(widget, name="Transform Result", area="right")
+
 def get_tile_flm_bbox(flm_height: int, flm_width: int, 
                       tem_height: int, tem_width: int,
                       flm_pixel_nm: float = 121.0, 
                       tem_pixel_nm: float = 6.9, 
                       tile_scale: float = 1.0) -> list[list[int]]:
-    """Given dimensions of two images, it splits the FLM region into overlapping tiles."""
     
     tile_h = int((tem_height * tem_pixel_nm) / flm_pixel_nm * tile_scale)
     tile_w = int((tem_width * tem_pixel_nm) / flm_pixel_nm * tile_scale)
@@ -70,6 +86,7 @@ def get_tile_flm_bbox(flm_height: int, flm_width: int,
         tiles.append([0, 0, tile_w, tile_h])
     
     return tiles
+
 def has_interior_peak(group_rois):
     """Returns True if the Laplacian peaks at an interior frame, not at the edges."""
     sorted_by_frame = sorted(group_rois, key=lambda r: r["frame_idx"])
@@ -660,16 +677,17 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
                         json.dump(state, w)
 
 
+# upscaled_ff_bb_save_dir = OUTPUT_DIR / 'upscaled_filtered_bbox'
 @magic_factory(
         call_button="Match Keypoints",
         thresh={"label": "Match Threshold", "value": 0.02}
 )
 def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
-    import io as _io
-    from PIL import Image as PILImage
     from lightglue import viz2d
+
     flm_segmentation_mask = cv2.imread(segmentation_dir / 'flm_seg_mask.png') / 255.0
     tem_segmentation_mask = cv2.imread(segmentation_dir / 'tem_seg_mask.png') / 255.0
+
     t0 = create_tensor_from_mask(flm_segmentation_mask, DEVICE)
     t1t = create_tensor_from_mask(tem_segmentation_mask, DEVICE)
 
@@ -677,17 +695,6 @@ def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
     
     mk0 = mk0.cpu().numpy()
     mk1 = mk1.cpu().numpy()
-
-    # load the state
-    with open(OUTPUT_DIR / 'state.json', 'r') as r:
-        state = json.load(r)
-
-    flm_frame_path = state["flm_idx_img_path"][0]
-    bboxes = state["bboxes"][0]
-    selected_bbox_idx = state["selected_bbox_idx"][0]
-
-    flm_img = cv2.imread(flm_frame_path)
-    bbox_origin_x, bbox_origin_y, _, _ = bboxes[selected_bbox_idx]
 
     show_info(f"Found {len(mk0)} matches")
     viz2d.plot_images([t0[0][0], t1t[0][0]])
@@ -700,10 +707,24 @@ def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
 
     viewer.add_image(img_arr, name=f"Keypoint Matches ({len(mk0)})", rgb=True)
 
+    # load the state
+    with open(OUTPUT_DIR / 'state.json', 'r') as r:
+        state = json.load(r)
+
+    flm_frame_path = state["flm_idx_img_path"][0]
+    bboxes = state["bboxes"][0]
+    selected_bbox_idx = state["selected_bbox_idx"][0]
+
+    # select the idx 
+    flm_path = [p for p in upscaled_ff_bb_save_dir.glob("*.png")][selected_bbox_idx]
+    
+    flm_img = cv2.imread(flm_path)
+    # bbox_origin_x, bbox_origin_y, _, _ = bboxes[selected_bbox_idx]
+
     # transform the keypoints on the flm upscaled image to the original image
-    mk0 = mk0 / 4 # images are upscaled 4x
-    mk0[: 0] += bbox_origin_x
-    mk0[:, 1] += bbox_origin_y
+    # mk0 = mk0 / 4 # images are upscaled 4x
+    # mk0[: 0] += bbox_origin_x
+    # mk0[:, 1] += bbox_origin_y
 
     # estimate transform
     M, _, scale = estimate_transform(mk0, mk1)
@@ -717,6 +738,11 @@ def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
         tem_img = cv2.cvtColor(tem_img, cv2.COLOR_BGR2GRAY)
 
     overlay, _, _, _ = apply_transform_overlay(flm_img, tem_img, M)
+
+    show_info(f"Scale: {scale:.4f} | Matrix:\n{M}")
+
+    M, _, scale = estimate_transform(mk0, mk1)
+    show_transform_result(viewer, M, scale)
 
     viewer.add_image(overlay, name="Overlay", rgb=True)
     viewer.reset_view()
