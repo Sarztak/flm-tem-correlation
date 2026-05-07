@@ -1,0 +1,20 @@
+name: roi-detect
+display_name: ROI Detect
+contributions:
+  commands:
+    - id: roi-detect.flm_roi_widget
+      python_name: roi_detect._widget_roi:flm_roi_widget
+      title: Launch FLM ROI Finder
+    - id: roi-detect.segment_widget
+      python_name: roi_detect._widget_roi:segment_widget
+      title: Launch FLM/TEM Segmentation  
+    - id: roi-detect.match_widget
+      python_name: roi_detect._widget_roi:match_widget
+      title: Launch Keypoint Matching
+  widgets:
+    - command: roi-detect.flm_roi_widget
+      display_name: FLM ROI Finder
+    - command: roi-detect.segment_widget
+      display_name: FLM & TEM Segmentation
+    - command: roi-detect.match_widget
+      display_name: Keypoint Matching
