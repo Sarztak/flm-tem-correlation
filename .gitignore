@@ -4,3 +4,6 @@ __pycache__
 jey_002_g3_l3/
 jey_002_g3_l8/
 output/
+SwinIR/
+LightGlue/
+segment_anything_2/
