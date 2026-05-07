@@ -4,8 +4,7 @@ from PIL import Image, ImageDraw
 import matplotlib.pyplot as plt
 import torch
 from streamlit_image_coordinates import streamlit_image_coordinates
-from model_setup import load_lightglue_models, load_sam2_model, create_tensor_from_mask, get_keypoint_matches
-from lightglue.utils import rbd
+from model_setup import load_lightglue_models, load_sam2_model, create_tensor_from_mask, get_keypoint_matches, estimate_transform, apply_transform_overlay
 from lightglue import viz2d
 
 st.set_page_config(layout="wide")
@@ -127,54 +126,7 @@ for i in ["1", "2"]:
                 if st.session_state[f"mask_{i}"] is not None:
                     st.image(st.session_state[f"mask_{i}"], clamp=True, caption="Mask")
 
-# Add after existing imports at top
-import cv2
 
-# Add these functions before the Streamlit code
-
-def estimate_transform(kpts0, kpts1):
-    """Estimate affine transformation from kpts0 to kpts1"""
-    M, inliers = cv2.estimateAffinePartial2D(
-        kpts0.astype(np.float32),
-        kpts1.astype(np.float32),
-        method=cv2.RANSAC,
-        ransacReprojThreshold=3.0
-    )
-
-    if M is None:
-        return None, None, 0
-
-    # Extract scale from transformation matrix
-    scale = np.sqrt(M[0,0]**2 + M[0,1]**2)
-
-    return M, inliers, scale
-
-
-def apply_transform_overlay(img_source, img_target, M, alpha=0.5):
-    h, w = img_target.shape[:2]
-    warped = cv2.warpAffine(img_source, M, (w, h), flags=cv2.INTER_LINEAR)
-
-    # normalize both to uint8
-    if img_target.max() > 0:
-        target_norm = (img_target.astype(float) / img_target.max() * 255).astype(np.uint8)
-    else:
-        target_norm = img_target.astype(np.uint8)
-
-    if warped.max() > 0:
-        warped_norm = (warped.astype(float) / warped.max() * 255).astype(np.uint8)
-    else:
-        warped_norm = warped.astype(np.uint8)
-
-    # overlay: target as gray, warped source as green
-    overlay = np.zeros((h, w, 3), dtype=np.uint8)
-    overlay[:, :, 0] = target_norm   # R = target gray
-    overlay[:, :, 1] = np.maximum(target_norm, warped_norm)  # G = both (gray + green)
-    overlay[:, :, 2] = target_norm   # B = target gray
-
-    # add warped source purely into green channel
-    overlay[:, :, 1] = np.clip(overlay[:, :, 1].astype(int) + warped_norm.astype(int), 0, 255).astype(np.uint8)
-
-    return overlay, warped, target_norm, warped_norm
 
 # Update the Match tab
 with t3:
@@ -202,7 +154,7 @@ with t3:
             # Store the match figure
             plt.close('all')
             viz2d.plot_images([t0[0][0].cpu(), t1t[0][0].cpu()])
-            viz2d.plot_matches(mk0.cpu(), mk1.cpu(), color="lime", lw=0.2)
+            viz2d.plot_matches(mk0, mk1, color="lime", lw=0.2)
             st.session_state['match_fig'] = plt.gcf()
 
         # Always show matches if they exist

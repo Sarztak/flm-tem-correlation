@@ -184,7 +184,7 @@ def upscale_and_save(input_dir: Path | str, output_dir: Path | str, window_size:
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
     for i, img in enumerate(upscaled):
-        cv2.imwrite(output_dir / f'{str(i).zfill(3)}.png', img)
+        cv2.imwrite(output_dir / f'{str(i).zfill(4)}.png', img)
 
 def create_tensor_from_mask(mask, device):
     # Mask is 2D bool/uint8, expand to 3-channel float tensor
@@ -196,7 +196,6 @@ def create_tensor_from_mask(mask, device):
 
 def get_keypoint_matches(extractor, matcher, image0, image1, conf_thresh):
     from lightglue.utils import rbd
-    from lightglue import viz2d
     feats0 = extractor.extract(image0)
     feats1 = extractor.extract(image1)
 
@@ -212,6 +211,49 @@ def get_keypoint_matches(extractor, matcher, image0, image1, conf_thresh):
     kpts0, kpts1, matches = feats0["keypoints"], feats1["keypoints"], matches01["matches"]
     return kpts0, kpts1, kpts0[matches[..., 0]], kpts1[matches[..., 1]], matches01
 
+
+def estimate_transform(kpts0, kpts1):
+    """Estimate affine transformation from kpts0 to kpts1"""
+    M, inliers = cv2.estimateAffinePartial2D(
+        kpts0.astype(np.float32),
+        kpts1.astype(np.float32),
+        method=cv2.RANSAC,
+        ransacReprojThreshold=3.0
+    )
+
+    if M is None:
+        return None, None, 0
+
+    # Extract scale from transformation matrix
+    scale = np.sqrt(M[0,0]**2 + M[0,1]**2)
+
+    return M, inliers, scale
+
+def apply_transform_overlay(img_source, img_target, M):
+    h, w = img_target.shape[:2]
+    warped = cv2.warpAffine(img_source, M, (w, h), flags=cv2.INTER_LINEAR)
+
+    # normalize both to uint8
+    if img_target.max() > 0:
+        target_norm = (img_target.astype(float) / img_target.max() * 255).astype(np.uint8)
+    else:
+        target_norm = img_target.astype(np.uint8)
+
+    if warped.max() > 0:
+        warped_norm = (warped.astype(float) / warped.max() * 255).astype(np.uint8)
+    else:
+        warped_norm = warped.astype(np.uint8)
+
+    # overlay: target as gray, warped source as green
+    overlay = np.zeros((h, w, 3), dtype=np.uint8)
+    overlay[:, :, 0] = target_norm   # R = target gray
+    overlay[:, :, 1] = np.maximum(target_norm, warped_norm)  # G = both (gray + green)
+    overlay[:, :, 2] = target_norm   # B = target gray
+
+    # add warped source purely into green channel
+    overlay[:, :, 1] = np.clip(overlay[:, :, 1].astype(int) + warped_norm.astype(int), 0, 255).astype(np.uint8)
+
+    return overlay, warped, target_norm, warped_norm
 
 if __name__ == "__main__":
     upscale_and_save()
