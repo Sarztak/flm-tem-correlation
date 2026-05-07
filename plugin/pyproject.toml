@@ -9,6 +9,7 @@ dependencies = [
     "scikit-image",
     "numpy",
     "opencv-python",
+    "networkx",
 ]
 
 [project.entry-points."napari.manifest"]
