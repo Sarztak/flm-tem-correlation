@@ -715,17 +715,18 @@ def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
     bboxes = state["bboxes"][0]
     selected_bbox_idx = state["selected_bbox_idx"][0]
 
-    # select the idx 
-    flm_path = [p for p in upscaled_ff_bb_save_dir.glob("*.png")][selected_bbox_idx]
-    
-    flm_img = cv2.imread(flm_path)
-    # bbox_origin_x, bbox_origin_y, _, _ = bboxes[selected_bbox_idx]
+    # select the idx (for debugging)
+    # flm_path = [p for p in upscaled_ff_bb_save_dir.glob("*.png")][selected_bbox_idx]
+    # flm_img = cv2.imread(flm_path)
+
+    flm_img = cv2.imread(flm_frame_path)
+    bbox_origin_x, bbox_origin_y, _, _ = bboxes[selected_bbox_idx]
 
     # transform the keypoints on the flm upscaled image to the original image
-    # mk0 = mk0 / 4 # images are upscaled 4x
-    # mk0[: 0] += bbox_origin_x
-    # mk0[:, 1] += bbox_origin_y
-
+    mk0 = mk0 / 4 # images are upscaled 4x
+    mk0[:, 0] += bbox_origin_x
+    mk0[:, 1] += bbox_origin_y
+    
     # estimate transform
     M, _, scale = estimate_transform(mk0, mk1)
 
