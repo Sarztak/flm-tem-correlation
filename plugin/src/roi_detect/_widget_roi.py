@@ -30,7 +30,8 @@ OUTPUT_DIR = ROOT_DIR / "output"
 # add the root_dir to the path to load models 
 sys.path.append(str(ROOT_DIR))
 
-from model_setup import upscale_and_save, load_sam2_model, load_lightglue_models, create_tensor_from_mask, get_keypoint_matches
+from model_setup import upscale_and_save, load_sam2_model, load_lightglue_models, create_tensor_from_mask, get_keypoint_matches, estimate_transform, apply_transform_overlay
+
 ff_bb_save_dir = OUTPUT_DIR / 'filtered_bbox'
 upscaled_ff_bb_save_dir = OUTPUT_DIR / 'upscaled_filtered_bbox'
 segmentation_dir = OUTPUT_DIR / 'segmentation'
@@ -43,6 +44,7 @@ handoff_dir.mkdir(exist_ok=True)
 
 _, predictor = load_sam2_model()
 extractor, matcher = load_lightglue_models()
+state = dict(flm_idx_img_path=[], bboxes=[], selected_bbox_idx=[])
 
 def get_tile_flm_bbox(flm_height: int, flm_width: int, 
                       tem_height: int, tem_width: int,
@@ -450,11 +452,17 @@ def flm_roi_widget(
                 flm_img_hist_eq = exposure.equalize_hist(flm_frame_uint8)
                 flm_img_hist_eq = (flm_img_hist_eq * 255).astype(np.uint8)
 
+                # need to save the bounding boxes and the flm img since they will be used for transformation 
+                flm_frame_path = OUTPUT_DIR / f"flm_frame_{roi['frame_idx']}.png"
+                cv2.imwrite(flm_frame_path, flm_frame_uint8) 
+                state["flm_idx_img_path"].append(str(flm_frame_path))
+                state["bboxes"].append(bboxes)
+
                 for (x0, y0, x1, y1) in bboxes:
                     # crop the regions from the refl channel and store them in output folder
                     crop = flm_img_hist_eq[y0:y1, x0:x1]
                     crop = np.stack([crop] * 3, axis=-1)
-                    cv2.imwrite(ff_bb_save_dir / f'{crop_idx}.png', crop)
+                    cv2.imwrite(ff_bb_save_dir / f'{str(crop_idx).zfill(4)}.png', crop)
                     crop_idx += 1
                     rectangles.append(np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]]))
 
@@ -508,11 +516,6 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
     viewer.layers.clear()
     viewer.add_image(canvas, name="Segmentation Grid")
 
-    tem_path = OUTPUT_DIR / "tem_inv_thresh.png"
-    print(tem_path.exists())
-    if tem_path.exists():
-        tem_inv_thresh_img = cv2.imread(tem_path)
-        # viewer.add_image(tem_inv_thresh_img, name="TEM Segmentation Image")
 
     points_layer = viewer.add_points(ndim=2, name="Selection", size=20, face_color="green")
 
@@ -553,6 +556,7 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
         # show_info(f"selected: {selected_path.name}")
         # print(f"selected image path: {selected_path}")
         points_layer.metadata["selected_idx"] = idx
+        state["selected_bbox_idx"].append(idx)
 
         # hide all the existing layers
         for layer in viewer.layers:
@@ -650,6 +654,11 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
                     tem_segmentation_mask = tem_segmentation_mask.astype(np.uint8) * 255
                     viewer.add_image(tem_segmentation_mask, name="TEM Mask")
                     cv2.imwrite(segmentation_dir / 'tem_seg_mask.png', tem_segmentation_mask)
+                    
+                    # write all the information present in the state dictionary
+                    with open(OUTPUT_DIR / 'state.json', 'w') as w:
+                        json.dump(state, w)
+
 
 @magic_factory(
         call_button="Match Keypoints",
@@ -665,17 +674,49 @@ def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
     t1t = create_tensor_from_mask(tem_segmentation_mask, DEVICE)
 
     _, _, mk0, mk1, m01 = get_keypoint_matches(extractor, matcher, t0, t1t, thresh)
+    
+    mk0 = mk0.cpu().numpy()
+    mk1 = mk1.cpu().numpy()
+
+    # load the state
+    with open(OUTPUT_DIR / 'state.json', 'r') as r:
+        state = json.load(r)
+
+    flm_frame_path = state["flm_idx_img_path"][0]
+    bboxes = state["bboxes"][0]
+    selected_bbox_idx = state["selected_bbox_idx"][0]
+
+    flm_img = cv2.imread(flm_frame_path)
+    bbox_origin_x, bbox_origin_y, _, _ = bboxes[selected_bbox_idx]
 
     show_info(f"Found {len(mk0)} matches")
     viz2d.plot_images([t0[0][0], t1t[0][0]])
     viz2d.plot_matches(mk0, mk1, color="lime", lw=0.2)
     fig = plt.gcf()
 
-    buf_io = _io.BytesIO()
     fig.savefig(OUTPUT_DIR / 'matches.png')
-    # buf_io.seek(0)
-    # img_arr = np.array(PILImage.open(buf_io).convert('RGB'))
-    # plt.close(fig)
+    img_arr = cv2.imread(OUTPUT_DIR / 'matches.png')
+    plt.close(fig)
 
-    # viewer.add_image(img_arr, name=f"Keypoint Matches ({len(mk0)})", rgb=True)
-    # viewer.reset_view()
+    viewer.add_image(img_arr, name=f"Keypoint Matches ({len(mk0)})", rgb=True)
+
+    # transform the keypoints on the flm upscaled image to the original image
+    mk0 = mk0 / 4 # images are upscaled 4x
+    mk0[: 0] += bbox_origin_x
+    mk0[:, 1] += bbox_origin_y
+
+    # estimate transform
+    M, _, scale = estimate_transform(mk0, mk1)
+
+    tem_img = cv2.imread(OUTPUT_DIR / 'tem.png')
+
+    # tem_img, and flm_img should both be gray scales images before passing to the function
+    if flm_img.ndim == 3:
+        flm_img = cv2.cvtColor(flm_img, cv2.COLOR_BGR2GRAY)
+    if tem_img.ndim == 3:
+        tem_img = cv2.cvtColor(tem_img, cv2.COLOR_BGR2GRAY)
+
+    overlay, _, _, _ = apply_transform_overlay(flm_img, tem_img, M)
+
+    viewer.add_image(overlay, name="Overlay", rgb=True)
+    viewer.reset_view()
