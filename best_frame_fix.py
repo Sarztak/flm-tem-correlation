@@ -3,9 +3,10 @@ import matplotlib.patches as patches
 from skimage import io
 from skimage import measure
 from skimage.filters import threshold_otsu
-
-import math
+from scipy.signal import savgol_filter, find_peaks
+from scipy.ndimage import gaussian_filter1d
 import numpy as np
+import math
 import matplotlib.pyplot as plt
 import gc
 from app_helper import threshold_otsu, iou
@@ -19,46 +20,6 @@ def _to_xy(bbox):
     y0, x0, y1, x1 = bbox
     return (x0, y0, x1, y1)
 
-def plot_groups_laplacian(all_rois, groups, separate_subplots=False, figsize=(10, 6)):
-    """
-    all_rois: list of dicts (each dict has 'frame_idx' and 'laplacian')
-    groups: iterable of sets/lists of indices into all_rois
-    separate_subplots: if True, one subplot per group; otherwise all groups on one axes
-    """
-    groups = [set(g) for g in groups]  # ensure sets
-    if separate_subplots:
-        n = len(groups)
-        cols = min(3, n)
-        rows = (n + cols - 1) // cols
-        fig, axes = plt.subplots(rows, cols, figsize=figsize, squeeze=False)
-        axes = axes.flatten()
-        for gi, comp in enumerate(groups):
-            if not comp:
-                continue
-            pts = sorted(((all_rois[i]["frame_idx"], all_rois[i]["laplacian"]) for i in comp), key=lambda x: x[0])
-            frames, laps = zip(*pts)
-            axes[gi].plot(frames, laps, marker='o', linestyle='-')
-            axes[gi].set_title(f'Group {gi} (size={len(comp)})')
-            axes[gi].set_xlabel('frame_idx')
-            axes[gi].set_ylabel('laplacian')
-        # hide unused axes
-        for ax in axes[len(groups):]:
-            ax.set_visible(False)
-        plt.tight_layout()
-    else:
-        plt.figure(figsize=figsize)
-        for gi, comp in enumerate(groups):
-            if not comp:
-                continue
-            pts = sorted(((all_rois[i]["frame_idx"], all_rois[i]["laplacian"]) for i in comp), key=lambda x: x[0])
-            frames, laps = zip(*pts)
-            plt.plot(frames, laps, marker='o', linestyle='-', label=f'Group {gi} (n={len(comp)})')
-        plt.xlabel('frame_idx')
-        plt.ylabel('laplacian')
-        plt.legend()
-        plt.tight_layout()
-
-    plt.show()
 
 def render_all_frames(flm_stack, render_flm_frame):
     """
@@ -341,3 +302,64 @@ def filter_and_merge_bboxes(bboxes, tem_height_flm, tem_width_flm):
 
     merged_bboxes = merge_bboxes(filtered_bboxes, tem_height_flm, tem_width_flm)
     return merged_bboxes
+
+
+def plot_groups_laplacian(groups_vals, figsize=(10, 6), cols=3, sharex=True, sharey=False):
+    """
+    groups_vals: List[List[float]] — each inner list contains laplacian values for one group (y-values).
+                 x-values will be frame indices 0..len-1 for each group.
+    figsize: figure size (width, height)
+    cols: max columns in the subplot grid
+    sharex/sharey: whether subplots share x/y axes
+    Returns (fig, axes)
+    """
+    n = len(groups_vals)
+    if n == 0:
+        return None, []
+
+    cols = min(cols, n)
+    rows = math.ceil(n / cols)
+    fig, axes = plt.subplots(rows, cols, figsize=figsize,
+                             squeeze=False, sharex=sharex, sharey=sharey)
+    axes = axes.flatten()
+
+    for i, vals in enumerate(groups_vals):
+        ax = axes[i]
+        if vals is None or len(vals) == 0:
+            ax.set_visible(False)
+            continue
+        x = list(range(len(vals)))
+        ax.plot(x, vals, marker='o', linestyle='-')
+        ax.set_title(f'Group {i} (n={len(vals)})')
+        ax.set_xlabel('frame_idx')
+        ax.set_ylabel('laplacian')
+
+    # hide unused axes
+    for j in range(n, len(axes)):
+        axes[j].set_visible(False)
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+def find_flat_peak(laps, smooth_sigma=2, min_prominence=10):
+    """
+    Returns the frame index of the flattest/most prominent peak.
+    Returns None if no interior peak found.
+    """
+    smoothed = gaussian_filter1d(laps.astype(float), sigma=smooth_sigma)
+    
+    peaks, props = find_peaks(
+        smoothed,
+        prominence=min_prominence,  # ignore small bumps
+        width=2,                     # peak must span at least 2 frames
+    )
+    
+    if len(peaks) == 0:
+        return None, smoothed
+    
+    # among all peaks pick the widest one (flattest top)
+    widths = props["widths"]
+    best = peaks[np.argmax(widths)]
+    return int(best), smoothed

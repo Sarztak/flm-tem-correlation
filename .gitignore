@@ -8,3 +8,4 @@ output/
 SwinIR/
 segment_anything_2/
 LightGlue/
+ImagePairs/

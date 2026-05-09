@@ -247,8 +247,10 @@ def apply_transform_overlay(img_source, img_target, M):
     # overlay: target as gray, warped source as green
     overlay = np.zeros((h, w, 3), dtype=np.uint8)
     overlay[:, :, 0] = target_norm   # R = target gray
-    overlay[:, :, 1] = np.maximum(target_norm, warped_norm)  # G = both (gray + green)
-    overlay[:, :, 2] = target_norm   # B = target gray
+    # overlay[:, :, 1] = np.maximum(target_norm, warped_norm)  # G = both (gray + green)
+    overlay[:, :, 1] = warped_norm # G = source
+    overlay[:, :, 2] = 0 # Y where target and source overlap
+    # overlay[:, :, 2] = target_norm   # B = target gray
 
     # add warped source purely into green channel
     overlay[:, :, 1] = np.clip(overlay[:, :, 1].astype(int) + warped_norm.astype(int), 0, 255).astype(np.uint8)
