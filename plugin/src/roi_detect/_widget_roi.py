@@ -21,6 +21,7 @@ from skimage import exposure, io, measure
 from skimage.filters import threshold_otsu
 from qtpy.QtWidgets import QLabel, QWidget, QVBoxLayout
 import sys 
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -432,7 +433,6 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
             
             flm_segmentation_mask = masks[np.argmax(scores)]
             flm_segmentation_mask = flm_segmentation_mask.astype(np.uint8) * 255
-            viewer.add_image(flm_segmentation_mask.astype(np.uint8) * 255, name="FLM Mask")
             cv2.imwrite(segmentation_dir / 'flm_seg_mask.png', flm_segmentation_mask)
 
             tem_path = OUTPUT_DIR / "tem_inv_thresh.png"
@@ -500,9 +500,25 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
                     
                     tem_segmentation_mask = masks[np.argmax(scores)]
                     tem_segmentation_mask = tem_segmentation_mask.astype(np.uint8) * 255
-                    viewer.add_image(tem_segmentation_mask, name="TEM Mask")
+                    # viewer.add_image(tem_segmentation_mask, name="TEM Mask")
                     cv2.imwrite(segmentation_dir / 'tem_seg_mask.png', tem_segmentation_mask)
                     
+                    fig, ax = plt.subplots(1, 2, figsize=(20, 15))
+                    ax[0].imshow(flm_segmentation_mask, cmap='gray')
+                    ax[0].set_title('FLM Segmentation Mask')
+                    ax[0].axis('off')
+                    ax[1].imshow(tem_segmentation_mask, cmap='gray')
+                    ax[1].axis('off')
+                    ax[1].set_title('TEM Segmentation Mask')
+                    plt.tight_layout()
+                    fig.savefig(segmentation_dir / 'FLM_TEM Segmentation Masks.png')
+                    flm_tem_seg_img = cv2.imread(segmentation_dir / 'FLM_TEM Segmentation Masks.png', 0)
+
+                    # add to napari
+                    for layer in viewer.layers:
+                        layer.visible = False
+                    viewer.add_image(flm_tem_seg_img, name="Segmented Images")
+
                     # write all the information present in the state dictionary
                     with open(OUTPUT_DIR / 'state.json', 'w') as w:
                         json.dump(state, w)
