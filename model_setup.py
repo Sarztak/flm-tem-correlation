@@ -145,6 +145,25 @@ def load_sam2_model(model_type: str = "small", device: str = None):
 
     return sam2_model, predictor
 
+def load_sam2_auto_model(model_type: str = "small", device: str = None):
+    """Load SAM 2 Model by type - large, small, tiny and return (model, mask_generator)"""
+    from sam2.build_sam import build_sam2
+    from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else "cpu"
+
+    SAM_CHECKPOINT = SAM_REPO / 'checkpoints'
+    model_checkpoint = sam2_checkpoints[model_type]
+    model = f"{SAM_CHECKPOINT}/{model_checkpoint}"
+    model_cfg = sam2_cfgs[model_type]
+    sam2_model = build_sam2(model_cfg, model, device=device)
+
+    print(f"SAM2 Automatic mask generator loaded from {model_checkpoint}")
+
+    return sam2_model
+
+
 def load_lightglue_models(filter_threshold: float = 0.05, depth_confidence=-1, width_confidence=-1):
     """Load SuperPoint + LightGlue from local checkpoints."""
     import torch

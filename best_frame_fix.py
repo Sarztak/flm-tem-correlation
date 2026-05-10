@@ -363,3 +363,56 @@ def find_flat_peak(laps, smooth_sigma=2, min_prominence=10):
     widths = props["widths"]
     best = peaks[np.argmax(widths)]
     return int(best), smoothed
+
+# collect all ROIs across all frames with their bounding boxes and laplacian
+def get_laplacian_per_bbox(flm_stack, bboxes):
+    laps_per_bbox = []
+    flm_refl = flm_stack[:, :, :, 1]
+
+    for bbox in bboxes:
+        y0, x0, y1, x1 = bbox
+        crops = flm_refl[:, y0:y1, x0:x1]  # (Z, H, W)
+        
+        mins = crops.min(axis=(1,2), keepdims=True)
+        maxs = crops.max(axis=(1,2), keepdims=True)
+        crops_u8 = ((crops - mins) / (maxs - mins + 1e-8) * 255).astype(np.uint8)
+        
+        laps = np.array([
+            cv2.Laplacian(crops_u8[z], cv2.CV_64F).var()
+            for z in range(crops_u8.shape[0])
+        ])  # shape (Z,)
+        laps_per_bbox.append(laps)
+    
+    return laps_per_bbox
+
+def prepare_tem(tem_img, thresh=130):
+    if tem_img.ndim == 3:
+        tem_img = tem_img[:, :, 0]
+    img_u8 = ((tem_img.astype(float) - tem_img.min()) / (tem_img.max() - tem_img.min() + 1e-8) * 255).astype(np.uint8)
+    inverted = 255 - img_u8
+    thresh_img = (inverted > thresh).astype(np.uint8) * 255
+    thresh_img = np.stack([thresh_img] * 3, axis=-1)
+    return img_u8, thresh_img  # img_u8 for final overlay, inverted for SAM
+
+def show_anns(anns, borders=True):
+    np.random.seed(3)
+    if len(anns) == 0:
+        return
+    sorted_anns = sorted(anns, key=(lambda x: x['area']), reverse=True)
+    ax = plt.gca()
+    ax.set_autoscale_on(False)
+
+    img = np.ones((sorted_anns[0]['segmentation'].shape[0], sorted_anns[0]['segmentation'].shape[1], 4))
+    img[:, :, 3] = 0
+    for ann in sorted_anns:
+        m = ann['segmentation']
+        color_mask = np.concatenate([np.random.random(3), [0.5]])
+        img[m] = color_mask 
+        if borders:
+            import cv2
+            contours, _ = cv2.findContours(m.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) 
+            # Try to smooth contours
+            contours = [cv2.approxPolyDP(contour, epsilon=0.01, closed=True) for contour in contours]
+            cv2.drawContours(img, contours, -1, (0, 0, 1, 0.4), thickness=1) 
+
+    ax.imshow(img)
