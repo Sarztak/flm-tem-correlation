@@ -40,12 +40,10 @@ from best_frame_fix import *
 ff_bb_save_dir = OUTPUT_DIR / 'filtered_bbox'
 upscaled_ff_bb_save_dir = OUTPUT_DIR / 'upscaled_filtered_bbox'
 segmentation_dir = OUTPUT_DIR / 'segmentation'
-handoff_dir = OUTPUT_DIR / "handoff"
 
 ff_bb_save_dir.mkdir(exist_ok=True)
 upscaled_ff_bb_save_dir.mkdir(exist_ok=True)
 segmentation_dir.mkdir(exist_ok=True)
-handoff_dir.mkdir(exist_ok=True)
 
 _, predictor = load_sam2_model()
 extractor, matcher = load_lightglue_models()
@@ -108,7 +106,7 @@ def flm_roi_widget(
     tem_width_flm  = (tem_w * tem_pixel_nm) / flm_pixel_nm
 
     # convert uint16 to unint 8 save it once and use again
-    rendered_stack_path = OUTPUT_DIR / "rendered_stack.npy"
+    rendered_stack_path = OUTPUT_DIR / f"rendered_stack_{flm_path.stem}.npy"
     if not (rendered_stack_path).exists():
         rendered_stack = render_all_frames(flm_stack, render_flm_frame)
         np.save(rendered_stack_path, rendered_stack)
@@ -396,6 +394,7 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
             if tem_path.exists():
                 tem_inv_thresh_img = cv2.imread(tem_path)
 
+
                 # in case selected image is not RGB, SAM needs it 
                 if len(tem_inv_thresh_img.shape) == 2:
                     tem_inv_thresh_img = np.stack([tem_inv_thresh_img] * 3)
@@ -444,7 +443,6 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
                     ]
 
                     coords = np.array(coords_tem_green + coords_tem_red)
-                    print(coords)
                     labs = np.array([1] * len(coords_tem_green) + [0] * len(coords_tem_red))
 
                     with torch.inference_mode():
