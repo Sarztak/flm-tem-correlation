@@ -219,17 +219,6 @@ def render_flm_frame(flm_frame):
 
     return composite
 
-def prepare_tem(tem_path, thresh=130):
-    from skimage import io
-    raw = io.imread(tem_path)
-    if raw.ndim == 3:
-        raw = raw[:, :, 0]
-    img_u8 = ((raw.astype(float) - raw.min()) / (raw.max() - raw.min() + 1e-8) * 255).astype(np.uint8)
-    inverted = 255 - img_u8
-    thresh_img = (inverted > thresh).astype(np.uint8) * 255
-    return img_u8, thresh_img  # img_u8 for final overlay, inverted for SAM
-
-
 def get_tile_flm_bbox_with_pad(flm_height: int, flm_width: int, 
                       tem_height: int, tem_width: int,
                       flm_pixel_nm: float = 121.0, 

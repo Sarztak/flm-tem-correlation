@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from skimage import io
-from skimage import measure
+from skimage import measure, exposure
 from skimage.filters import threshold_otsu
 from scipy.signal import savgol_filter, find_peaks
 from scipy.ndimage import gaussian_filter1d
@@ -9,11 +9,16 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 import gc
-from app_helper import threshold_otsu, iou
+from app_helper import threshold_otsu, iou, get_tile_flm_bbox_with_pad
 import networkx as nx
 from skimage import measure
 import cv2
 from app_helper import merge_bboxes
+
+def norm(img):
+    diff = img.max() - img.min()
+    if diff == 0: return np.zeros_like(img, dtype=np.uint8)
+    return ((img - img.min()) / diff * 255).astype(np.uint8)
 
 def _to_xy(bbox):
     # regionprops bbox: (min_row, min_col, max_row, max_col) -> (x0,y0,x1,y1)
@@ -290,7 +295,7 @@ def plot_bbox_over_roi_mask(roi_mask, bboxes):
 
     ax.axis('off')
 
-def filter_and_merge_bboxes(bboxes, tem_height_flm, tem_width_flm):
+def filter_and_merge_bboxes(bboxes, tem_height_flm, tem_width_flm, flm_h, flm_w):
     min_area_thresh = tem_height_flm * tem_width_flm
     filtered_bboxes = []
     for bbox in bboxes:
@@ -300,9 +305,8 @@ def filter_and_merge_bboxes(bboxes, tem_height_flm, tem_width_flm):
         if height * width >= min_area_thresh:
             filtered_bboxes.append(bbox)
 
-    merged_bboxes = merge_bboxes(filtered_bboxes, tem_height_flm, tem_width_flm)
+    merged_bboxes = merge_bboxes(filtered_bboxes, tem_height_flm, tem_width_flm, flm_h, flm_w)
     return merged_bboxes
-
 
 def plot_groups_laplacian(groups_vals, figsize=(10, 6), cols=3, sharex=True, sharey=False):
     """
@@ -416,3 +420,46 @@ def show_anns(anns, borders=True):
             cv2.drawContours(img, contours, -1, (0, 0, 1, 0.4), thickness=1) 
 
     ax.imshow(img)
+
+
+# now for each valid bbox and select the best frame and do histogram equalization, and tiling and store the tiles
+def equalize_flm_frame(flm_frame):
+    flm_refl_uint8 = norm(flm_frame)
+    flm_img_hist_eq = exposure.equalize_hist(flm_refl_uint8)
+    flm_img_hist_eq = (flm_img_hist_eq * 255).astype(np.uint8)
+    return flm_img_hist_eq
+
+def tiles_per_best_frame(bbox_best_frame, global_bboxes, flm_h, flm_w, tem_h, tem_w, flm_pixel_nm, tem_pixel_nm, tile_scale=1.5):
+    tiles_and_frame = []
+    for b in bbox_best_frame:
+        d = {} # just a dict to store information
+        best_bbox_idx = b["bbox_idx"]
+        best_frame_idx = b["frame_idx"]
+            
+        best_bbox_pts = global_bboxes[best_bbox_idx]
+        bb_y0, bb_x0, bb_y1, bb_x1 = best_bbox_pts
+
+        flm_w = bb_x1 - bb_x0
+        flm_h = bb_y1 - bb_y0
+        tiles_bbox, padding = get_tile_flm_bbox_with_pad(
+            flm_height=flm_h, flm_width=flm_w, 
+            tem_height=tem_h, tem_width=tem_w,
+            flm_pixel_nm=flm_pixel_nm, 
+            tem_pixel_nm=tem_pixel_nm,
+            tile_scale=tile_scale,
+        )
+        # padding is no longer needed because I will be cropping directly from
+        # the entire image
+        d["frame_idx"] = best_frame_idx
+
+        tiles_in_ref_bbox = []
+        for y0, x0, y1, x1 in tiles_bbox:
+            # do origin tranformation 
+            bbox_tiles_points = (y0 + bb_y0, x0 + bb_x0, y1 + bb_y0, x1 + bb_x0)
+            tiles_in_ref_bbox.append(bbox_tiles_points)
+        
+        d["bboxes"] = tiles_in_ref_bbox
+
+        tiles_and_frame.append(d)
+    
+    return tiles_and_frame
