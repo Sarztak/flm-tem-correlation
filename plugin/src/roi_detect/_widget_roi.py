@@ -35,6 +35,7 @@ sys.path.append(str(ROOT_DIR))
 from model_setup import upscale_and_save, load_sam2_model, load_lightglue_models, create_tensor_from_mask, get_keypoint_matches, estimate_transform, apply_transform_overlay
 
 from app_helper import *
+from best_frame_fix import *
 
 ff_bb_save_dir = OUTPUT_DIR / 'filtered_bbox'
 upscaled_ff_bb_save_dir = OUTPUT_DIR / 'upscaled_filtered_bbox'
@@ -102,60 +103,80 @@ def flm_roi_widget(
     flm_stack = io.imread(str(flm_path))
     img_tem = io.imread(str(tem_path))
     tem_h, tem_w = img_tem.shape[:2]
-    all_rois = get_all_rois(
-        flm_stack, 
-        tem_h, tem_w,
-        flm_pixel_nm=flm_pixel_nm, 
-        tem_pixel_nm=tem_pixel_nm, 
-        pad_factor=pad_factor,
+    flm_h, flm_w = flm_stack.shape[1:3]
+    tem_height_flm = (tem_h * tem_pixel_nm) / flm_pixel_nm
+    tem_width_flm  = (tem_w * tem_pixel_nm) / flm_pixel_nm
+
+    # convert uint16 to unint 8 save it once and use again
+    rendered_stack_path = OUTPUT_DIR / "rendered_stack.npy"
+    if not (rendered_stack_path).exists():
+        rendered_stack = render_all_frames(flm_stack, render_flm_frame)
+        np.save(rendered_stack_path, rendered_stack)
+    else:
+        rendered_stack = np.load(rendered_stack_path)
+
+    roi_masks = [get_roi_mask(flm_stack[i]) for i in range(len(flm_stack))]
+    bboxes = [get_bbox_from_roi_mask(roi_mask) for roi_mask in roi_masks]
+    filted_and_merged_bboxes = [filter_and_merge_bboxes(b, tem_height_flm / 2, tem_width_flm / 2, flm_h, flm_w) for b in bboxes]
+
+    all_bboxes = []
+    for b in filted_and_merged_bboxes:
+        all_bboxes.extend(b)
+    global_bboxes = filter_and_merge_bboxes(all_bboxes, tem_height_flm / 2, tem_width_flm / 2, flm_h, flm_w)
+
+    laps_per_bbox = get_laplacian_per_bbox(flm_stack, global_bboxes)
+
+    bbox_best_frame = []
+    for bbox_idx, laps in enumerate(laps_per_bbox):
+        peak_idx, peak_vals = find_flat_peak(laps)
+        if peak_idx:
+            bbox_best_frame.append({"bbox_idx": bbox_idx, "frame_idx": peak_idx})
+            show_info(f"BBox: {bbox_idx} -> Best Frame: {peak_idx}, Val: {peak_vals[peak_idx]}")
+
+    # select by index from global bbox and the frame_idx from bbox_best_frame
+
+    # do the tiling, points from this will be used to filter selected points
+    tiles_and_frame = tiles_per_best_frame(
+        bbox_best_frame=bbox_best_frame, global_bboxes=global_bboxes,
+        flm_h=flm_h, flm_w=flm_w, flm_pixel_nm=flm_pixel_nm,
+        tem_h=tem_h, tem_w=tem_w, tem_pixel_nm=tem_pixel_nm,
+        tile_scale=tile_scale,
     )
 
+    # flatten the tiles_and_frame from list of dictionary to a list of tuple
+    tile_bbox_and_frame_idx = []
+    for tf in tiles_and_frame:
+        best_frame_idx = tf["frame_idx"]
+        for bbox in tf["bboxes"]:
+            tile_bbox_and_frame_idx.append((bbox, best_frame_idx))
+
+    rectangles = []
+    properties = {'label': [], 'frame': []}
+
+    composite = np.full((flm_h, flm_w, 3), 0, dtype=np.uint8)
+    for b in bbox_best_frame:
+        best_bbox_idx = b["bbox_idx"]
+        best_frame_idx = b["frame_idx"]
+            
+        best_bbox_pts = global_bboxes[best_bbox_idx]
+        bb_y0, bb_x0, bb_y1, bb_x1 = best_bbox_pts
+
+        rect = np.array([[bb_y0, bb_x0], [bb_y0, bb_x1], [bb_y1, bb_x1], [bb_y1, bb_x0]])
+        rectangles.append(rect)
+        properties['label'].append(f"ROI {best_bbox_idx} | frame {best_frame_idx}")
+        properties['frame'].append(best_frame_idx)
+
+        composite[bb_y0:bb_y1, bb_x0:bb_x1] = rendered_stack[best_frame_idx, bb_y0:bb_y1, bb_x0:bb_x1]
 
     # prepare the tem_img for the next stage
-    img_uint8, inv_thresh_tem_img = prepare_tem(tem_path)
+    img_uint8, inv_thresh_tem_img = prepare_tem(img_tem)
     cv2.imwrite(OUTPUT_DIR / "tem.png", img_uint8)
     cv2.imwrite(OUTPUT_DIR / "tem_inv_thresh.png", inv_thresh_tem_img)
 
-    best_per_group = find_best_roi_frame_idx(all_rois, iou_threshold=iou_threshold)
-    h, w = flm_stack.shape[1:3]
-    composite = np.full((h, w, 3), 0, dtype=np.uint8)
-
-    rectangles = []
-    properties = {'label': [], 'frame': [], 'laplacian': []}
-
-    for i, roi in enumerate(best_per_group):
-        frame = flm_stack[roi["frame_idx"]]
-        x0, y0, x1, y1 = roi["bbox"]
-        crop = frame[y0:y1, x0:x1, :] # only display reflection channel
-
-        refl = crop[:, :, 1]
-        green = crop[:, :, 0]
-        blue = crop[:, :, 2]
-        
-        refl_u8 = norm(refl)
-        blue_u8 = norm(blue)
-        green_u8 = norm(green)
-
-        composite[y0:y1, x0:x1, 2] = np.clip(refl_u8.astype(int) + blue_u8, 0, 255)  # Blue channel
-        composite[y0:y1, x0:x1, 1] = np.clip(refl_u8.astype(int) + green_u8, 0, 255) # Green channel
-        composite[y0:y1, x0:x1, 0] = refl_u8
-        # crop_u8 = ((crop - crop.min()) / (crop.max() - crop.min()) * 255).astype(np.uint8)
-        # composite[y0:y1, x0:x1, :] = crop_u8
-
-        # napari shapes expects [[row0,col0],[row1,col1]] i.e. [[y0,x0],[y1,x1]]
-        rect = np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]])
-        rectangles.append(rect)
-        properties['label'].append(f"ROI {i} | frame {roi['frame_idx']}")
-        properties['frame'].append(roi['frame_idx'])
-        properties['laplacian'].append(roi['laplacian'])
-
-    # select the middle image of the flm_stack to serve as background image 
-    napari_compatible_flm_img = render_flm_frame(flm_stack[len(flm_stack)//2])
-    viewer.add_image(napari_compatible_flm_img, name='flm stack')
-
+    viewer.add_image(rendered_stack[0], name='flm stack')
     viewer.add_image(composite, name="best frame per roi")
 
-    shapes_layer = viewer.add_shapes(
+    viewer.add_shapes(
         rectangles,
         shape_type='rectangle',
         edge_color='white',
@@ -179,122 +200,56 @@ def flm_roi_widget(
         face_color='yellow',
     )
 
-
-    # after user has added points, run this to find which ROI each point is in
-    def collect_user_data():
-        pts = points_layer.data
-        pts_per_region = defaultdict(list)
-    
-        for pt in pts:
-            py, px = pt[0], pt[1]
-            for roi_idx, roi in enumerate(best_per_group):
-                x0, y0, x1, y1 = roi['bbox']
-
-                if y0 <= py <= y1 and x0 <= px <= x1:
-                    # the bounding box is the key and group points in those bounding boxes
-                    pts_per_region[roi_idx].append([px, py])
-                    break # assuming that a point belongs to a single ROI
-        return pts_per_region
-
-    # tile the regions and select those that have the points in them
-    def create_tiles():
-        filtered_bbox = defaultdict(list)
-        pts_per_region = collect_user_data()
-        for roi_idx, roi in enumerate(best_per_group):
-            if roi_idx in pts_per_region:
-                # select only the reflection channel to tile
-                x0, y0, x1, y1 = roi['bbox']
-                origin_x, origin_y = roi['origin']
-                flm_w = x1 - x0
-                flm_h = y1 - y0
-                tiles_bbox = get_tile_flm_bbox(
-                    flm_height=flm_h, flm_width=flm_w, 
-                    tem_height=tem_h, tem_width=tem_w,
-                    flm_pixel_nm=flm_pixel_nm, tem_pixel_nm=tem_pixel_nm,
-                    tile_scale=tile_scale
-                )
-
-                # now filter the bounding boxes that have the user selected points            
-                # I want to optimize this later on
-                for t_x0, t_y0, t_x1, t_y1 in tiles_bbox:
-                    # bbox are in the reference frame of the ROI, so they need to be made into absolute coordinates
-                    t_x0 += origin_x
-                    t_x1 += origin_x
-                    t_y0 += origin_y
-                    t_y1 += origin_y
-                    for [px, py] in pts_per_region[roi_idx]:
-                        if t_x0 < px < t_x1 and t_y0 < py < t_y1:
-                            filtered_bbox[roi_idx].append([t_x0, t_y0, t_x1, t_y1])
-                            break # just find a box per point because if other points are there then same box will be selected so no need to check
-        return filtered_bbox 
-
-
-    def get_points_in_rois():
-        pts = points_layer.data  # shape (N, 2) as [row, col] i.e. [y, x]
-        results = []
-        for pt in pts:
-            py, px = pt[0], pt[1]
-            for i, roi in enumerate(best_per_group):
-                x0, y0, x1, y1 = roi['bbox']
-                if y0 <= py <= y1 and x0 <= px <= x1:
-                    results.append({'point': pt, 'roi_idx': i, 'roi': roi})
-                    # break  # assume one ROI per point
-        return results
+    points_layer.mode = 'add'
+    viewer.reset_view()
 
     # when other images are loaded, it tried to bind the enter key again which causes error, therefore it needs to check before binding
     viewer.bind_key('Enter', None, overwrite=True) 
     @viewer.bind_key('Enter')
     def on_done(viewer):
-        results = get_points_in_rois()
-        filtered_bbox = create_tiles() # dictionary of filtered tiles per roi_idx
+        
+        user_selected_tile_and_frame = []
+        pts = points_layer.data  # shape (N, 2) as [row, col] i.e. [y, x]
+        for pt in pts:
+            py, px = pt[0], pt[1]
+            for bbox, best_frame_idx in tile_bbox_and_frame_idx:
+                t_y0, t_x0, t_y1, t_x1 = bbox # this has already been in the frame of image
+                if t_x0 < px < t_x1 and t_y0 < py < t_y1:
+                    user_selected_tile_and_frame.append((bbox, best_frame_idx))
+        
+        tile_rectangles = []
+        bboxes = []
+        for idx, (bbox, best_frame_idx) in enumerate(user_selected_tile_and_frame):
+            t_y0, t_x0, t_y1, t_x1 = bbox
+            bboxes.append(bbox)
+            flm_frame = flm_stack[best_frame_idx, :, :, 1] # use refl channel
+            flm_frame_eq = equalize_flm_frame(flm_frame)
+            flm_frame_eq_rgb = np.stack([flm_frame_eq] * 3, axis=-1)
+            best_roi_cropped = flm_frame_eq_rgb[t_y0:t_y1, t_x0:t_x1]
+            tile_rectangles.append(
+                np.array([[t_y0, t_x0], [t_y0, t_x1], [t_y1, t_x1], [t_y1, t_x0]])
+            )
+            cv2.imwrite(ff_bb_save_dir / f'{str(idx).zfill(4)}.png', best_roi_cropped)
+            flm_frame_path = OUTPUT_DIR / f"flm_frame_{best_frame_idx}.png"
+            cv2.imwrite(flm_frame_path, rendered_stack[best_frame_idx, :, :, 1])
+            state["flm_idx_img_path"].append(str(flm_frame_path))
+        state["bboxes"].append(bboxes)
 
-        rectangles = []
-        crop_idx = 0
-        for roi_idx, roi in enumerate(best_per_group):
-            if roi_idx in filtered_bbox:
-                bboxes = filtered_bbox[roi_idx]
-                flm_frame = flm_stack[roi['frame_idx'], :, :, 1] # use refl channel
-                flm_frame_uint8 = norm(flm_frame)
-                flm_img_hist_eq = exposure.equalize_hist(flm_frame_uint8)
-                flm_img_hist_eq = (flm_img_hist_eq * 255).astype(np.uint8)
-
-                # need to save the bounding boxes and the flm img since they will be used for transformation 
-                flm_frame_path = OUTPUT_DIR / f"flm_frame_{roi['frame_idx']}.png"
-                cv2.imwrite(flm_frame_path, flm_frame_uint8) 
-                state["flm_idx_img_path"].append(str(flm_frame_path))
-                state["bboxes"].append(bboxes)
-
-                for (x0, y0, x1, y1) in bboxes:
-                    # crop the regions from the refl channel and store them in output folder
-                    crop = flm_img_hist_eq[y0:y1, x0:x1]
-                    crop = np.stack([crop] * 3, axis=-1)
-                    cv2.imwrite(ff_bb_save_dir / f'{str(crop_idx).zfill(4)}.png', crop)
-                    crop_idx += 1
-                    rectangles.append(np.array([[y0, x0], [y0, x1], [y1, x1], [y1, x0]]))
-
-        upscale_and_save(ff_bb_save_dir, upscaled_ff_bb_save_dir)
-        tiles_bbox_shapes_layer = viewer.add_shapes(
-            rectangles,
+        viewer.add_shapes(
+            tile_rectangles,
             shape_type='rectangle',
             edge_color='red',
             face_color='transparent',
             edge_width=2,
         )
 
-
-        for r in results:
-            print(f"Point {r['point']} → ROI {r['roi_idx']} | frame {r['roi']['frame_idx']}")
-
-
-    points_layer.mode = 'add'
-    viewer.reset_view()
-
-
-    # del flm_stack, img_tem
-    gc.collect()
+        upscale_and_save(ff_bb_save_dir, upscaled_ff_bb_save_dir)
 
 @magic_factory(call_button="Load Segmentation Images")
 def segment_widget(viewer: "napari.viewer.Viewer"):
+    for layer in viewer.layers:
+        layer.visible = False
+
     img_paths = sorted(upscaled_ff_bb_save_dir.glob("*.png"))
     if not img_paths:
         show_info("No images found.")
@@ -379,6 +334,15 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
         selected_flm_layer = viewer.add_image(selected_img, name="FLM Crop Selected for Segmentation")
         selected_flm_layer.visible = True
 
+        # annotation layer for the background points, color red
+        annotation_layer_flm_red = viewer.add_points(
+            ndim=2,
+            name="FLM Background Segmentation Points",
+            size=15,
+            face_color="red",
+        )
+        annotation_layer_flm_red.mode = 'add'
+
         # annotation layer for the foreground points, color green
         annotation_layer_flm_green = viewer.add_points(
             ndim=2,
@@ -388,14 +352,6 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
         )
         annotation_layer_flm_green.mode = 'add'
 
-        # annotation layer for the background points, color red
-        annotation_layer_flm_red = viewer.add_points(
-            ndim=2,
-            name="FLM Background Segmentation Points",
-            size=15,
-            face_color="red",
-        )
-        annotation_layer_flm_red.mode = 'add'
         viewer.reset_view()
         
         # bind Enter to confirm annotation and store points
@@ -445,15 +401,6 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
                     tem_inv_thresh_img = np.stack([tem_inv_thresh_img] * 3)
                 viewer.add_image(tem_inv_thresh_img, name="tem segmentation image")
 
-                # annotation layer for the foreground points, color green
-                annotation_layer_tem_green = viewer.add_points(
-                    ndim=2,
-                    name="TEM Foreground Segmentation Points",
-                    size=15,
-                    face_color="green",
-                )
-                annotation_layer_tem_green.mode = 'add'
-
                 # annotation layer for the background points, color red
                 annotation_layer_tem_red = viewer.add_points(
                     ndim=2,
@@ -463,7 +410,16 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
                 )
                 annotation_layer_tem_red.mode = 'add'
                 viewer.reset_view()
-        
+
+                # annotation layer for the foreground points, color green
+                annotation_layer_tem_green = viewer.add_points(
+                    ndim=2,
+                    name="TEM Foreground Segmentation Points",
+                    size=15,
+                    face_color="green",
+                )
+                annotation_layer_tem_green.mode = 'add'
+       
                 viewer.bind_key('Enter', None, overwrite=True)
                 @viewer.bind_key('Enter')
                 def on_tem_annotation_done(viewer):
@@ -532,6 +488,9 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
 def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
     from lightglue import viz2d
 
+    for layer in viewer.layers:
+        layer.visible = False
+
     flm_segmentation_mask = cv2.imread(segmentation_dir / 'flm_seg_mask.png') / 255.0
     tem_segmentation_mask = cv2.imread(segmentation_dir / 'tem_seg_mask.png') / 255.0
 
@@ -567,7 +526,7 @@ def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
     # flm_img = cv2.imread(flm_path)
 
     flm_img = cv2.imread(flm_frame_path)
-    bbox_origin_x, bbox_origin_y, _, _ = bboxes[selected_bbox_idx]
+    bbox_origin_y, bbox_origin_x, _, _ = bboxes[selected_bbox_idx] # the bounding boxes are y, x
 
     # transform the keypoints on the flm upscaled image to the original image
     mk0 = mk0 / 4 # images are upscaled 4x
