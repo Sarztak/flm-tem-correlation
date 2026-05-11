@@ -54,10 +54,10 @@ def has_interior_peak(group_rois):
     # peak must not be at the first or last frame
     return 0 < peak_idx < len(values) - 1
 
-def merge_bboxes(bboxes, tem_height_flm: float, tem_width_flm: float) -> list:
+def merge_bboxes(bboxes, tem_height_flm: float, tem_width_flm: float, flm_img_h, flm_img_w) -> list:
     merge_dist = int(max(tem_height_flm, tem_width_flm))
     expanded = [
-        (r0 - merge_dist, c0 - merge_dist, r1 + merge_dist, c1 + merge_dist)
+        (max(0, r0 - merge_dist), max(0, c0 - merge_dist), min(r1 + merge_dist, flm_img_h), min(c1 + merge_dist, flm_img_w))
         for r0, c0, r1, c1 in bboxes
     ]
     expanded.sort(key=lambda x: x[0])
