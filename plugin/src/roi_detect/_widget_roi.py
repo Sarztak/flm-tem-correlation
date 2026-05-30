@@ -394,7 +394,6 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
             if tem_path.exists():
                 tem_inv_thresh_img = cv2.imread(tem_path)
 
-
                 # in case selected image is not RGB, SAM needs it 
                 if len(tem_inv_thresh_img.shape) == 2:
                     tem_inv_thresh_img = np.stack([tem_inv_thresh_img] * 3)
