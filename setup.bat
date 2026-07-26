@@ -28,4 +28,5 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo Setup complete. Open napari to use the plugin.
+echo Setup complete. To launch napari run:
+echo   uv run napari

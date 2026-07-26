@@ -23,4 +23,5 @@ echo "=== Step 3: Clone model repos, download weights, install plugin ==="
 uv run python install.py
 
 echo ""
-echo "Setup complete. Open napari to use the plugin."
+echo "Setup complete. To launch napari run:"
+echo "  uv run napari"
