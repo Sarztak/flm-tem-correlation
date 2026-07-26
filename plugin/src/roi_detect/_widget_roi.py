@@ -25,7 +25,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-ROOT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment")
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 DEFAULT_DIR = ROOT_DIR / "jey_002_g3_l3"
 OUTPUT_DIR = ROOT_DIR / "output"
 

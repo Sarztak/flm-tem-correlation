@@ -7,7 +7,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
-DEFAULT_DIR = Path(r"C:\Users\sar31\Documents\GitHub\flm_tem_alignment")
+DEFAULT_DIR = Path(__file__).resolve().parent
 SWINIR_REPO = DEFAULT_DIR / 'SwinIR'
 SWINIR_MODEL_ZOO = SWINIR_REPO / 'checkpoints'
 SAM_REPO = DEFAULT_DIR / 'segment_anything_2'
