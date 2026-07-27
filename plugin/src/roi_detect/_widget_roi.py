@@ -20,7 +20,6 @@ from scipy.optimize import minimize
 from skimage import exposure, io, measure
 from skimage.filters import threshold_otsu
 from qtpy.QtWidgets import QLabel, QWidget, QVBoxLayout
-import sys 
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -29,13 +28,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 DEFAULT_DIR = ROOT_DIR / "jey_002_g3_l3"
 OUTPUT_DIR = ROOT_DIR / "output"
 
-# add the root_dir to the path to load models 
-sys.path.append(str(ROOT_DIR))
-
-from model_setup import upscale_and_save, load_sam2_model, load_lightglue_models, create_tensor_from_mask, get_keypoint_matches, estimate_transform, apply_transform_overlay
-
-from app_helper import *
-from best_frame_fix import *
+from .models import upscale_and_save, load_sam2_model, load_lightglue_models, create_tensor_from_mask, get_keypoint_matches, estimate_transform, apply_transform_overlay
+from .roi import *
 
 ff_bb_save_dir = OUTPUT_DIR / 'filtered_bbox'
 upscaled_ff_bb_save_dir = OUTPUT_DIR / 'upscaled_filtered_bbox'
