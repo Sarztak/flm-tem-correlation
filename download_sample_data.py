@@ -10,9 +10,10 @@ Data hosted on OSF: https://osf.io/459jg/
 """
 
 import sys
-import urllib.request
 import zipfile
 from pathlib import Path
+
+import requests
 
 BASE = Path(__file__).resolve().parent
 
@@ -30,15 +31,6 @@ DATASETS = {
 }
 
 
-def _progress(block_num, block_size, total_size):
-    downloaded = block_num * block_size
-    if total_size > 0:
-        pct = min(downloaded / total_size * 100, 100)
-        mb = downloaded / 1_048_576
-        total_mb = total_size / 1_048_576
-        print(f"\r  {pct:.1f}%  {mb:.0f} / {total_mb:.0f} MB", end="", flush=True)
-
-
 def download_and_extract(key: str, info: dict) -> None:
     dest = info["dest"]
     if dest.exists():
@@ -46,8 +38,22 @@ def download_and_extract(key: str, info: dict) -> None:
         return
 
     zip_path = info["zip"]
-    print(f"Downloading {dest.name} (~1 GB) ...")
-    urllib.request.urlretrieve(info["url"], zip_path, reporthook=_progress)
+    print(f"Downloading {dest.name} ...")
+    with requests.get(info["url"], stream=True) as r:
+        r.raise_for_status()
+        total = int(r.headers.get("content-length", 0))
+        downloaded = 0
+        with open(zip_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1 << 20):
+                f.write(chunk)
+                downloaded += len(chunk)
+                mb = downloaded / 1_048_576
+                if total:
+                    pct = min(downloaded / total * 100, 100)
+                    total_mb = total / 1_048_576
+                    print(f"\r  {pct:.1f}%  {mb:.0f} / {total_mb:.0f} MB", end="", flush=True)
+                else:
+                    print(f"\r  {mb:.0f} MB downloaded...", end="", flush=True)
     print()
 
     print(f"  Extracting ...")
