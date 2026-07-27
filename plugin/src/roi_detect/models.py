@@ -35,7 +35,7 @@ sys.path.insert(0, str(LIGHTGLUE_REPO))
 
 
 def load_swinir_model(checkpoint: Path = SWINIR_MODEL):
-    from models.network_swinir import SwinIR as net
+    from models.network_swinir import SwinIR as net  # type: ignore
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = net(
         upscale=4, in_chans=3, img_size=64, window_size=8, img_range=1.0,
@@ -92,8 +92,8 @@ def swinir_upscale(
 
 
 def load_sam2_model(model_type: str = "small", device: str = None):
-    from sam2.build_sam import build_sam2
-    from sam2.sam2_image_predictor import SAM2ImagePredictor
+    from sam2.build_sam import build_sam2 # type: ignore
+    from sam2.sam2_image_predictor import SAM2ImagePredictor # type: ignore
 
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else "cpu"
@@ -106,8 +106,9 @@ def load_sam2_model(model_type: str = "small", device: str = None):
 
 
 def load_sam2_auto_model(model_type: str = "small", device: str = None):
-    from sam2.build_sam import build_sam2
-    from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+    from sam2.build_sam import build_sam2 # type: ignore
+    from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator # type: ignore
+
 
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else "cpu"
@@ -119,7 +120,8 @@ def load_sam2_auto_model(model_type: str = "small", device: str = None):
 
 
 def load_lightglue_models(filter_threshold: float = 0.05, depth_confidence=-1, width_confidence=-1):
-    from lightglue import LightGlue, SuperPoint
+    from lightglue import LightGlue, SuperPoint # type: ignore
+
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     extractor = SuperPoint(max_num_keypoints=1024).eval().to(device)
@@ -157,7 +159,7 @@ def create_tensor_from_mask(mask, device):
 
 
 def get_keypoint_matches(extractor, matcher, image0, image1, conf_thresh):
-    from lightglue.utils import rbd
+    from lightglue.utils import rbd # type: ignore
     feats0 = extractor.extract(image0)
     feats1 = extractor.extract(image1)
     matcher.conf.filter_threshold = conf_thresh

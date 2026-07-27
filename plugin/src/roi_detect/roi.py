@@ -1,9 +1,7 @@
 import gc
-import math
 import numpy as np
 import cv2
 import networkx as nx
-from pathlib import Path
 from scipy.signal import find_peaks
 from scipy.ndimage import gaussian_filter1d
 from skimage import measure, exposure

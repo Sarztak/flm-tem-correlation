@@ -2,25 +2,13 @@ import json
 import torch
 import numpy as np
 import cv2
-import gc
+import matplotlib.pyplot as plt
 from pathlib import Path
 from skimage import io
 from magicgui import magic_factory
-from magicgui.widgets import ComboBox, PushButton, Container
 import napari
 from napari.utils.notifications import show_info
-import networkx as nx
-from collections import defaultdict
-import cv2
-import matplotlib.pyplot as plt
-import numpy as np
-from PIL import Image
-from scipy import ndimage
-from scipy.optimize import minimize
-from skimage import exposure, io, measure
-from skimage.filters import threshold_otsu
 from qtpy.QtWidgets import QLabel, QWidget, QVBoxLayout
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -64,7 +52,7 @@ def show_transform_result(viewer, M, scale):
     flm_path={
         "label": "FLM Stack Path", 
         "mode": "r", 
-        "value": DEFAULT_DIR / "FLM-stack_JEY002_G3_L3.tif"
+        "value": DEFAULT_DIR / "Composite-stacks-JEY002-G3-L3.tif"
     },
     tem_path={
         "label": "TEM Image Path", 
@@ -477,7 +465,7 @@ def segment_widget(viewer: "napari.viewer.Viewer"):
         thresh={"label": "Match Threshold", "value": 0.02}
 )
 def match_widget(viewer: "napari.viewer.Viewer", thresh: float):
-    from lightglue import viz2d
+    from lightglue import viz2d  # type: ignore
 
     for layer in viewer.layers:
         layer.visible = False
