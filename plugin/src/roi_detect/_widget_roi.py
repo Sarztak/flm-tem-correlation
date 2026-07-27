@@ -16,6 +16,11 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 DEFAULT_DIR = ROOT_DIR / "jey_002_g3_l3"
 OUTPUT_DIR = ROOT_DIR / "output"
 
+_default_flm = DEFAULT_DIR / "Composite-stacks-JEY002-G3-L3.tif"
+_default_tem = DEFAULT_DIR / "JEY002_G3_L3_1950x_t-13.tif"
+_default_flm = _default_flm if _default_flm.exists() else Path.home()
+_default_tem = _default_tem if _default_tem.exists() else Path.home()
+
 from .models import upscale_and_save, load_sam2_model, load_lightglue_models, create_tensor_from_mask, get_keypoint_matches, estimate_transform, apply_transform_overlay
 from .roi import *
 
@@ -52,12 +57,12 @@ def show_transform_result(viewer, M, scale):
     flm_path={
         "label": "FLM Stack Path", 
         "mode": "r", 
-        "value": DEFAULT_DIR / "Composite-stacks-JEY002-G3-L3.tif"
+        "value": _default_flm
     },
     tem_path={
-        "label": "TEM Image Path", 
-        "mode": "r", 
-        "value": DEFAULT_DIR / "JEY002_G3_L3_1950x_t-13.tif"
+        "label": "TEM Image Path",
+        "mode": "r",
+        "value": _default_tem
     },
     flm_pixel_nm={"label": "FLM px (nm)", "value": 121.0},
     tem_pixel_nm={"label": "TEM px (nm)", "value": 6.9},
