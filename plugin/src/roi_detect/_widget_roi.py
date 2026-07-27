@@ -16,10 +16,14 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 DEFAULT_DIR = ROOT_DIR / "jey_002_g3_l3"
 OUTPUT_DIR = ROOT_DIR / "output"
 
-_default_flm = DEFAULT_DIR / "Composite-stacks-JEY002-G3-L3.tif"
-_default_tem = DEFAULT_DIR / "JEY002_G3_L3_1950x_t-13.tif"
-_default_flm = _default_flm if _default_flm.exists() else Path.home()
-_default_tem = _default_tem if _default_tem.exists() else Path.home()
+_FLM_FILE = DEFAULT_DIR / "Composite-stacks-JEY002-G3-L3.tif"
+_TEM_FILE = DEFAULT_DIR / "JEY002_G3_L3_1950x_t-13.tif"
+_demo_exists = _FLM_FILE.exists() and _TEM_FILE.exists()
+
+_default_flm = _FLM_FILE if _demo_exists else Path("")
+_default_tem = _TEM_FILE if _demo_exists else Path("")
+_default_flm_px = 121.0 if _demo_exists else 1.0
+_default_tem_px = 6.9 if _demo_exists else 1.0
 
 from .models import upscale_and_save, load_sam2_model, load_lightglue_models, create_tensor_from_mask, get_keypoint_matches, estimate_transform, apply_transform_overlay
 from .roi import *
@@ -64,8 +68,8 @@ def show_transform_result(viewer, M, scale):
         "mode": "r",
         "value": _default_tem
     },
-    flm_pixel_nm={"label": "FLM px (nm)", "value": 121.0},
-    tem_pixel_nm={"label": "TEM px (nm)", "value": 6.9},
+    flm_pixel_nm={"label": "FLM px (nm)", "value": _default_flm_px},
+    tem_pixel_nm={"label": "TEM px (nm)", "value": _default_tem_px},
     pad_factor={"label": "padding factor", "value": 1},
     iou_threshold={"label": "IOU threshold", "value": 0.3},
     tile_scale={"label": "FLM Tile Padding", "value": 2},
