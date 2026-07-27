@@ -32,9 +32,9 @@ ff_bb_save_dir = OUTPUT_DIR / 'filtered_bbox'
 upscaled_ff_bb_save_dir = OUTPUT_DIR / 'upscaled_filtered_bbox'
 segmentation_dir = OUTPUT_DIR / 'segmentation'
 
-ff_bb_save_dir.mkdir(exist_ok=True)
-upscaled_ff_bb_save_dir.mkdir(exist_ok=True)
-segmentation_dir.mkdir(exist_ok=True)
+ff_bb_save_dir.mkdir(parents=True, exist_ok=True)
+upscaled_ff_bb_save_dir.mkdir(parents=True, exist_ok=True)
+segmentation_dir.mkdir(parents=True, exist_ok=True)
 
 _, predictor = load_sam2_model()
 extractor, matcher = load_lightglue_models()
