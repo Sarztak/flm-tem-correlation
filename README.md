@@ -80,13 +80,16 @@ Open napari, then load the three widgets in order from **Plugins → ROI Detect*
 flm-tem-correlation/
 ├── plugin/                  # napari plugin (roi-detect)
 │   └── src/roi_detect/
-│       ├── _widget_roi.py   # the three napari widgets
+│       ├── roi.py           # ROI detection, tiling, z-frame sharpness scoring
+│       ├── viz.py           # visualisation helpers (used by demo)
+│       ├── models.py        # model loading and inference
+│       ├── _widget_roi.py   # napari widgets
 │       └── napari.yaml      # plugin manifest
-├── model_setup.py           # model loading and inference helpers
-├── app_helper.py            # ROI detection and tiling
-├── best_frame_fix.py        # z-frame sharpness scoring
-├── app2.py                  # Streamlit app (alternative UI)
-├── install.py               # sets up model repos and weights
+├── app_helper.py            # shim — backwards compat with older version
+├── best_frame_fix.py        # shim — backwards compat with older version
+├── model_setup.py           # shim — backwards compat with older version
+├── demo.ipynb               # interactive demo notebook
+├── install.py               # clones model repos and downloads weights
 ├── download_sample_data.py  # downloads demo images from OSF
 ├── setup.bat                # Windows one-command setup
 └── setup.sh                 # Mac/Linux one-command setup
