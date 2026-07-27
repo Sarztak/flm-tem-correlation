@@ -49,9 +49,9 @@ bash setup.sh
 Demo images (specimen JEY002, grids G3_L3 and G3_L8) are hosted on OSF. Download with:
 
 ```
-python download_sample_data.py           # both specimens (~2 GB total)
-python download_sample_data.py g3_l3     # JEY002_G3_L3 only
-python download_sample_data.py g3_l8     # JEY002_G3_L8 only
+uv run python download_sample_data.py           # both specimens
+uv run python download_sample_data.py g3_l3     # JEY002_G3_L3 only
+uv run python download_sample_data.py g3_l8     # JEY002_G3_L8 only
 ```
 
 ## Usage
