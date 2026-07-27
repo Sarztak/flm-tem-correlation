@@ -21,7 +21,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo === Step 3: Install Python dependencies ===
-uv pip install setuptools
+uv pip install "setuptools==81.0.0"
 uv sync
 if %errorlevel% neq 0 (
     echo [ERROR] uv sync failed

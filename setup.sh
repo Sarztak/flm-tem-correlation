@@ -19,7 +19,7 @@ uv run --no-sync python install.py clone
 
 echo ""
 echo "=== Step 3: Install Python dependencies ==="
-uv pip install setuptools
+uv pip install "setuptools==81.0.0"
 uv sync
 
 echo ""
