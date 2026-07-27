@@ -12,7 +12,15 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo === Step 2: Install Python dependencies (uv sync) ===
+echo === Step 2: Clone model repos ===
+python install.py clone
+if %errorlevel% neq 0 (
+    echo [ERROR] cloning repos failed
+    exit /b 1
+)
+
+echo.
+echo === Step 3: Install Python dependencies ===
 uv sync
 if %errorlevel% neq 0 (
     echo [ERROR] uv sync failed
@@ -20,10 +28,10 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo === Step 3: Clone model repos, download weights, install plugin ===
-uv run python install.py
+echo === Step 4: Download model weights ===
+uv run python install.py weights
 if %errorlevel% neq 0 (
-    echo [ERROR] install.py failed
+    echo [ERROR] weight download failed
     exit /b 1
 )
 

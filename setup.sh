@@ -8,19 +8,22 @@ echo ""
 echo "=== Step 1: Install uv ==="
 if ! command -v uv &>/dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Make uv available in this session
     export PATH="$HOME/.local/bin:$PATH"
 else
     echo "  uv already installed"
 fi
 
 echo ""
-echo "=== Step 2: Install Python dependencies (uv sync) ==="
+echo "=== Step 2: Clone model repos ==="
+python install.py clone
+
+echo ""
+echo "=== Step 3: Install Python dependencies ==="
 uv sync
 
 echo ""
-echo "=== Step 3: Clone model repos, download weights, install plugin ==="
-uv run python install.py
+echo "=== Step 4: Download model weights ==="
+uv run python install.py weights
 
 echo ""
 echo "Setup complete. To launch napari run:"
