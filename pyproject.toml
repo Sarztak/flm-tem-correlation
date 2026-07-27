@@ -25,8 +25,12 @@ dependencies = [
     "streamlit>=1.57.0",
     "streamlit-image-coordinates>=0.4.0",
     "timm>=1.0.26",
+    "setuptools",
     "torch>=2.11.0",
 ]
+
+[tool.uv]
+no-build-isolation-package = ["sam-2"]
 
 [tool.uv.sources]
 roi-detect = { path = "plugin", editable = true }

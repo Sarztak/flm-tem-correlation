@@ -13,7 +13,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo === Step 2: Clone model repos ===
-python install.py clone
+uv run --no-sync python install.py clone
 if %errorlevel% neq 0 (
     echo [ERROR] cloning repos failed
     exit /b 1
@@ -21,6 +21,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo === Step 3: Install Python dependencies ===
+uv pip install setuptools
 uv sync
 if %errorlevel% neq 0 (
     echo [ERROR] uv sync failed

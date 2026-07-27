@@ -15,10 +15,11 @@ fi
 
 echo ""
 echo "=== Step 2: Clone model repos ==="
-python install.py clone
+uv run --no-sync python install.py clone
 
 echo ""
 echo "=== Step 3: Install Python dependencies ==="
+uv pip install setuptools
 uv sync
 
 echo ""

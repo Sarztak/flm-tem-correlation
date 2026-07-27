@@ -2,7 +2,7 @@
 install.py — one-time setup for flm-tem-alignment
 
 Called by setup.bat / setup.sh in two stages:
-  python install.py clone    # clone model repos (must run BEFORE uv sync)
+  uv run --no-sync python install.py clone    # clone model repos (must run BEFORE uv sync)
   uv run python install.py weights  # download model weights (run AFTER uv sync)
 
 Pinned commits (tested and known-good):
