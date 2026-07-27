@@ -1,3 +1,9 @@
 .venv
 *.pyc
 __pycache__
+
+# don't commit the model folders
+LightGlue/
+SwinIR/
+segment_anything_2/
+
